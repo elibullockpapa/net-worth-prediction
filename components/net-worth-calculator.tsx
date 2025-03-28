@@ -12,9 +12,50 @@ import {
     ResponsiveContainer,
     TooltipProps,
 } from "recharts";
-import { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
+import {
+    NameType,
+    ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
 
-// Historical S&P 500 REAL returns (inflation-adjusted), assumed 1929-2024 based on length
+// Define retro color palette (adjust as needed)
+const colors = {
+    background: "bg-gradient-to-br from-amber-100 via-orange-200 to-amber-200", // Linen/paper texture
+    panelBg: "bg-gradient-to-b from-stone-300 to-stone-400", // Light metallic/plastic
+    panelShadow:
+        "shadow-[4px_4px_8px_rgba(0,0,0,0.3),-2px_-2px_4px_rgba(255,255,255,0.5),inset_0_0_0_1px_rgba(0,0,0,0.1)]",
+    legendBg: "bg-gradient-to-b from-stone-400 to-stone-500", // Darker label area
+    legendText: "text-stone-100 text-shadow-sm shadow-black/50",
+    inputText: "text-gray-800",
+    inputBg:
+        "bg-gradient-to-b from-gray-100 to-gray-200 shadow-inner shadow-black/20", // Inset look
+    inputBorder: "border border-gray-400 border-t-gray-300 border-l-gray-300",
+    buttonBg: "bg-gradient-to-b from-sky-500 to-sky-700",
+    buttonHoverBg: "hover:from-sky-400 hover:to-sky-600",
+    buttonActiveBg:
+        "active:from-sky-600 active:to-sky-800 active:shadow-inner active:shadow-black/30 active:pt-px", // Press down effect
+    buttonShadow:
+        "shadow-[2px_2px_5px_rgba(0,0,0,0.4),inset_0_1px_1px_rgba(255,255,255,0.3)]",
+    buttonText: "text-white font-semibold text-shadow-sm shadow-black/40",
+    removeButtonBg: "bg-gradient-to-b from-red-500 to-red-700",
+    removeButtonHoverBg: "hover:from-red-400 hover:to-red-600",
+    removeButtonActiveBg:
+        "active:from-red-600 active:to-red-800 active:shadow-inner active:shadow-black/30 active:pt-px",
+    chartPanelBg: "bg-gradient-to-b from-zinc-700 via-zinc-800 to-black", // Darker chart area
+    chartPanelShadow:
+        "shadow-[6px_6px_12px_rgba(0,0,0,0.4),-3px_-3px_6px_rgba(255,255,255,0.1),inset_0_0_0_1px_rgba(0,0,0,0.2)]",
+    tooltipBg: "bg-yellow-50/95 border-amber-700 border-2 shadow-xl", // Old paper tooltip
+    tooltipText: "text-amber-900",
+    accentLine1: "#a0522d", // Sienna - for Net Worth
+    accentLine2: "#2e8b57", // SeaGreen - for Income
+    accentLine3: "#daa520", // Goldenrod - for Savings
+    accentLineBacktest: "#4682b4", // SteelBlue - for Backtest
+    readoutBg:
+        "bg-gray-800 text-green-400 font-mono p-2 rounded shadow-inner shadow-black border border-gray-900/50", // LCD Readout
+    statsPanelBg:
+        "bg-gradient-to-b from-blue-100 to-blue-200 border border-blue-500 shadow-md", // Info panel style
+};
+
+// --- Data and Helpers (Unchanged) ---
 const realReturns = [
     -12.44, -23.59, -41.64, -5.41, 45.43, -7.57, 37.21, 26.13, -40.28, 28.78,
     -5.45, -15.29, -25.23, 3.13, 15.89, 11.31, 27.97, -25.35, -8.09, -3.57,
@@ -28,12 +69,9 @@ const realReturns = [
     23.31, -2.88,
 ];
 const HISTORICAL_START_YEAR = 1929;
-const LAST_HISTORICAL_DATA_YEAR =
-    HISTORICAL_START_YEAR + realReturns.length - 1;
 
-// Helper: Format currency
 const formatCurrency = (value: number | null | undefined): string => {
-    if (value == null || isNaN(value)) return "$0.00";
+    if (value == null || isNaN(value)) return "$0";
 
     return `$${value.toLocaleString(undefined, {
         minimumFractionDigits: 0,
@@ -41,7 +79,6 @@ const formatCurrency = (value: number | null | undefined): string => {
     })}`;
 };
 
-// Helper: Format currency for smaller numbers or details
 const formatCurrencyDetailed = (value: number | null | undefined): string => {
     if (value == null || isNaN(value)) return "$0.00";
 
@@ -51,7 +88,6 @@ const formatCurrencyDetailed = (value: number | null | undefined): string => {
     })}`;
 };
 
-// --- Tax Functions ---
 const virginiaTaxRate = (income: number): number => {
     if (income <= 3000) return 0.02 * income;
     if (income <= 5000) return 60 + 0.03 * (income - 3000);
@@ -77,7 +113,6 @@ interface SalaryEntry {
     age: number;
     salary: number;
 }
-
 interface ProjectionData {
     age: number;
     salary: number;
@@ -88,19 +123,10 @@ interface ProjectionData {
     returnRate: number;
     netWorth: number;
 }
-
 interface BacktestResult {
     year: number;
     netWorth: number;
     avgReturn: number;
-}
-
-interface BacktestStats {
-    best: BacktestResult;
-    worst: BacktestResult;
-    avgNetWorth: number;
-    medianNetWorth: number;
-    results: BacktestResult[];
 }
 
 interface SimulationConfig {
@@ -114,43 +140,83 @@ interface SimulationConfig {
     pSalarySchedule: SalaryEntry[];
 }
 
-// Custom tooltip for main chart
-const CustomTooltip = ({ active, payload, label }: TooltipProps<ValueType, NameType>) => {
+// --- Custom Tooltips (Skeuomorphic Style) ---
+const CustomTooltip = ({
+    active,
+    payload,
+    label,
+}: TooltipProps<ValueType, NameType>) => {
     if (active && payload && payload.length) {
         const data = payload[0].payload;
+
         return (
-            <div className="bg-white p-3 border rounded shadow-lg">
-                <p className="font-semibold">Age: {label}</p>
-                <div className="space-y-1 mt-2 text-sm">
-                    <p>Net Worth: {formatCurrency(data.netWorth)}</p>
+            <div
+                className={`${colors.tooltipBg} p-3 rounded ${colors.tooltipText}`}
+            >
+                <p className="font-bold text-base mb-2 border-b border-amber-600 pb-1">
+                    Age: {label}
+                </p>
+                <div className="space-y-1 text-sm font-medium">
+                    <p>
+                        Net Worth:{" "}
+                        <span className="font-bold">
+                            {formatCurrency(data.netWorth)}
+                        </span>
+                    </p>
                     <p>Income: {formatCurrency(data.salary)}</p>
                     <p>Taxes: {formatCurrency(data.totalTax)}</p>
                     <p>Savings: {formatCurrency(data.annualSavings)}</p>
                     <p>Spending: {formatCurrency(data.livingMoney)}</p>
-                    {data.returnRate && (
-                        <p>Return Rate: {data.returnRate.toFixed(2)}%</p>
+                    {data.returnRate != null && ( // Check for null/undefined
+                        <p>
+                            Return Rate:{" "}
+                            <span
+                                className={
+                                    data.returnRate >= 0
+                                        ? "text-green-700"
+                                        : "text-red-700"
+                                }
+                            >
+                                {data.returnRate.toFixed(2)}%
+                            </span>
+                        </p>
                     )}
                 </div>
             </div>
         );
     }
+
     return null;
 };
 
-// Custom tooltip for backtest chart
-const BacktestCustomTooltip = ({ active, payload, label }: TooltipProps<ValueType, NameType>) => {
+const BacktestCustomTooltip = ({
+    active,
+    payload,
+    label,
+}: TooltipProps<ValueType, NameType>) => {
     if (active && payload && payload.length) {
         const data = payload[0].payload;
+
         return (
-            <div className="bg-white p-3 border rounded shadow-lg">
-                <p className="font-semibold">Start Year: {label}</p>
-                <div className="space-y-1 mt-2 text-sm">
-                    <p>Final Net Worth: {formatCurrency(data.netWorth)}</p>
-                    <p>Average Return: {data.avgReturn.toFixed(2)}%</p>
+            <div
+                className={`${colors.tooltipBg} p-3 rounded ${colors.tooltipText}`}
+            >
+                <p className="font-bold text-base mb-2 border-b border-amber-600 pb-1">
+                    Start Year: {label}
+                </p>
+                <div className="space-y-1 text-sm font-medium">
+                    <p>
+                        Final Net Worth:{" "}
+                        <span className="font-bold">
+                            {formatCurrency(data.netWorth)}
+                        </span>
+                    </p>
+                    <p>Avg. Return: {data.avgReturn.toFixed(2)}%</p>
                 </div>
             </div>
         );
     }
+
     return null;
 };
 
@@ -172,13 +238,12 @@ export default function NetWorthCalculator() {
         { age: 50, salary: 400000 },
     ]);
 
-    // Sort schedule by age for reliable lookup
+    // --- Hooks and Logic (Unchanged) ---
     const sortedSalarySchedule = useMemo(
         () => [...salarySchedule].sort((a, b) => a.age - b.age),
         [salarySchedule],
     );
 
-    // --- Salary Schedule Editing ---
     const handleSalaryChange = useCallback(
         (index: number, field: keyof SalaryEntry, value: string) => {
             setSalarySchedule((currentSchedule) => {
@@ -222,7 +287,6 @@ export default function NetWorthCalculator() {
         );
     }, []);
 
-    // --- Core Projection Logic ---
     const generateProjection = useCallback(
         (simConfig: SimulationConfig): ProjectionData[] => {
             const {
@@ -236,11 +300,7 @@ export default function NetWorthCalculator() {
                 pSalarySchedule,
             } = simConfig;
 
-            if (pSalarySchedule.length === 0) {
-                console.error("Salary schedule cannot be empty.");
-
-                return [];
-            }
+            if (pSalarySchedule.length === 0) return [];
 
             let netWorth = pInitialCash;
             const projectionData: ProjectionData[] = [];
@@ -248,7 +308,6 @@ export default function NetWorthCalculator() {
 
             for (let i = 0; i < simulationYears; i++) {
                 const currentAge = pStartAge + i;
-
                 let currentSalary = pSalarySchedule[0].salary;
 
                 for (let j = pSalarySchedule.length - 1; j >= 0; j--) {
@@ -277,15 +336,12 @@ export default function NetWorthCalculator() {
                     ) {
                         returnRate = realReturns[historicalYearIndex];
                     } else {
-                        console.warn(
-                            `Historical data not available for year index ${historicalYearIndex} (Sim Age: ${currentAge}, Sim Start Year: ${pSimStartYear}). Using default return ${pInvestmentReturn}%.`,
-                        );
+                        // console.warn(`Historical data fallback for year index ${historicalYearIndex}.`); // Keep console clean for UI focus
                         returnRate = pInvestmentReturn;
                     }
                 }
 
                 netWorth = netWorth * (1 + returnRate / 100) + annualSavings;
-
                 projectionData.push({
                     age: currentAge,
                     salary: currentSalary,
@@ -303,11 +359,8 @@ export default function NetWorthCalculator() {
         [],
     );
 
-    // Memoize the main projection table data
     const tableData = useMemo(() => {
-        if (startAge > endAge || sortedSalarySchedule.length === 0) {
-            return [];
-        }
+        if (startAge > endAge || sortedSalarySchedule.length === 0) return [];
 
         return generateProjection({
             pStartAge: startAge,
@@ -331,30 +384,25 @@ export default function NetWorthCalculator() {
         generateProjection,
     ]);
 
-    // --- Backtesting Logic ---
-    const canRunHistorical = useMemo(() => {
-        const requiredYears = endAge - startAge + 1;
-
-        if (requiredYears <= 0) return false;
-
-        return requiredYears <= realReturns.length;
-    }, [startAge, endAge]);
-
-    const maxBacktestStartYear = useMemo(() => {
-        return (
-            HISTORICAL_START_YEAR + realReturns.length - (endAge - startAge + 1)
-        );
-    }, [startAge, endAge]);
+    const canRunHistorical = useMemo(
+        () => endAge - startAge + 1 <= realReturns.length,
+        [startAge, endAge],
+    );
+    const maxBacktestStartYear = useMemo(
+        () =>
+            HISTORICAL_START_YEAR +
+            realReturns.length -
+            (endAge - startAge + 1),
+        [startAge, endAge],
+    );
 
     const backtestStats = useMemo(() => {
         if (
             !useHistorical ||
             !canRunHistorical ||
             sortedSalarySchedule.length === 0
-        ) {
+        )
             return null;
-        }
-
         const results: BacktestResult[] = [];
 
         for (
@@ -387,9 +435,7 @@ export default function NetWorthCalculator() {
                 });
             }
         }
-
         if (results.length === 0) return null;
-
         const best = results.reduce((a, b) =>
             a.netWorth > b.netWorth ? a : b,
         );
@@ -398,8 +444,6 @@ export default function NetWorthCalculator() {
         );
         const avgNetWorth =
             results.reduce((acc, r) => acc + r.netWorth, 0) / results.length;
-
-        // Calculate median net worth
         const sortedNetWorths = [...results].sort(
             (a, b) => a.netWorth - b.netWorth,
         );
@@ -425,115 +469,126 @@ export default function NetWorthCalculator() {
         generateProjection,
     ]);
 
+    // --- Component Rendering ---
     return (
-        <div className="p-4 md:p-8 space-y-6 bg-gray-50 min-h-screen">
-            <h1 className="text-2xl font-bold text-gray-800 mb-6">
-                Net Worth Projection
-            </h1>
+        <div
+            className={`p-6 md:p-10 min-h-screen ${colors.background} font-sans`}
+        >
+            {/* Title Plaque */}
+            <div className="mb-8 text-center">
+                <h1
+                    className={`inline-block px-8 py-3 text-3xl font-bold ${colors.legendBg} ${colors.legendText} rounded-lg ${colors.panelShadow} tracking-wide`}
+                >
+                    Net Worth Projection
+                </h1>
+            </div>
 
-            <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded border border-blue-200">
-                <strong>Important:</strong> All monetary values (Initial Cash,
-                Salaries) should be entered in{" "}
-                <strong className="font-semibold">today&apos;s dollars</strong>.
-                The projection uses historical{" "}
-                <strong className="font-semibold">real</strong>{" "}
-                (inflation-adjusted) returns, so the final net worth is also in
-                today&apos;s purchasing power. No separate inflation input is
-                needed.
+            {/* Explanatory Note - Taped Paper Style */}
+            <p className="text-sm text-amber-900 bg-yellow-50/80 p-4 rounded-md border-2 border-dashed border-amber-700/50 shadow-lg mb-8 max-w-4xl mx-auto relative">
+                <span className="absolute -top-2 -left-2 bg-gray-400/50 w-8 h-8 rotate-[-20deg] shadow-sm" />{" "}
+                {/* Tape */}
+                <span className="absolute -top-2 -right-2 bg-gray-400/50 w-8 h-8 rotate-[15deg] shadow-sm" />{" "}
+                {/* Tape */}
+                <strong className="font-semibold text-amber-950">
+                    IMPORTANT NOTE:
+                </strong>{" "}
+                All monetary values (Initial Cash, Salaries) are in{" "}
+                <strong className="font-semibold text-amber-950">
+                    {`today's dollars`}
+                </strong>
+                . The projection utilizes historical{" "}
+                <strong className="font-semibold text-amber-950">real</strong>{" "}
+                (inflation-adjusted) returns. The final net worth is also
+                {`presented in today's purchasing power.`}
             </p>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Column 1: Core Parameters */}
-                <fieldset className="border p-4 rounded-md bg-white shadow-sm">
-                    <legend className="text-lg font-semibold px-2 text-gray-700">
-                        Simulation Parameters
+            {/* Control Panel Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+                {/* --- Column 1: Core Parameters --- */}
+                <fieldset
+                    className={`p-5 rounded-lg ${colors.panelBg} ${colors.panelShadow}`}
+                >
+                    <legend
+                        className={`px-3 py-1 text-lg font-semibold ${colors.legendBg} ${colors.legendText} rounded-md -mt-8 mb-4 inline-block ${colors.panelShadow}`}
+                    >
+                        Simulation Setup
                     </legend>
-                    <div className="space-y-4 p-2">
-                        <label className="flex flex-col text-sm font-medium text-gray-700">
-                            Start Age
-                            <input
-                                className="mt-1 p-2 border rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                                min="0"
-                                type="number"
-                                value={startAge}
-                                onChange={(e) =>
-                                    setStartAge(
-                                        Math.max(
-                                            0,
-                                            parseInt(e.target.value) || 0,
-                                        ),
-                                    )
-                                }
-                            />
-                        </label>
-                        <label className="flex flex-col text-sm font-medium text-gray-700">
-                            End Age
-                            <input
-                                className="mt-1 p-2 border rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                                min={startAge}
-                                type="number"
-                                value={endAge}
-                                onChange={(e) =>
-                                    setEndAge(
-                                        Math.max(
-                                            startAge,
-                                            parseInt(e.target.value) ||
-                                            startAge,
-                                        ),
-                                    )
-                                }
-                            />
-                        </label>
-                        <label className="flex flex-col text-sm font-medium text-gray-700">
-                            Initial Cash ({formatCurrency(initialCash)})
-                            <input
-                                className="mt-1 p-2 border rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                                min="0"
-                                step="1000"
-                                type="number"
-                                value={initialCash}
-                                onChange={(e) =>
-                                    setInitialCash(
-                                        Math.max(0, Number(e.target.value)),
-                                    )
-                                }
-                            />
-                        </label>
-                        <label className="flex flex-col text-sm font-medium text-gray-700">
-                            Annual Savings Rate (% of After-Tax Income)
-                            <input
-                                className="mt-1 p-2 border rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                                max="100"
-                                min="0"
-                                step="1"
-                                type="number"
-                                value={savingsRate}
-                                onChange={(e) =>
-                                    setSavingsRate(
-                                        Math.max(
-                                            0,
-                                            Math.min(
-                                                100,
-                                                Number(e.target.value),
-                                            ),
-                                        ),
-                                    )
-                                }
-                            />
-                        </label>
+                    <div className="space-y-5 p-2">
+                        {/* Input Field Styling */}
+                        {[
+                            {
+                                label: "Start Age",
+                                value: startAge,
+                                setter: setStartAge,
+                                min: 0,
+                                step: 1,
+                            },
+                            {
+                                label: "End Age",
+                                value: endAge,
+                                setter: setEndAge,
+                                min: startAge,
+                                step: 1,
+                            },
+                            {
+                                label: `Initial Cash (${formatCurrency(initialCash)})`,
+                                value: initialCash,
+                                setter: setInitialCash,
+                                min: 0,
+                                step: 1000,
+                            },
+                            {
+                                label: "Savings Rate (% After-Tax)",
+                                value: savingsRate,
+                                setter: setSavingsRate,
+                                min: 0,
+                                max: 100,
+                                step: 1,
+                            },
+                        ].map(({ label, value, setter, min, max, step }) => (
+                            <label
+                                key={label}
+                                className="flex flex-col text-sm font-medium text-gray-800"
+                            >
+                                {label}
+                                <input
+                                    className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
+                                    max={max}
+                                    min={min}
+                                    step={step}
+                                    type="number"
+                                    value={value}
+                                    onChange={(e) => {
+                                        let numVal = Number(e.target.value);
+
+                                        if (min !== undefined)
+                                            numVal = Math.max(min, numVal);
+                                        if (max !== undefined)
+                                            numVal = Math.min(max, numVal);
+                                        setter(
+                                            isNaN(numVal) ? (min ?? 0) : numVal,
+                                        );
+                                    }}
+                                />
+                            </label>
+                        ))}
                     </div>
                 </fieldset>
 
-                {/* Column 2: Investment & Historical Options */}
-                <fieldset className="border p-4 rounded-md bg-white shadow-sm">
-                    <legend className="text-lg font-semibold px-2 text-gray-700">
-                        Investment Returns
+                {/* --- Column 2: Investment & Historical --- */}
+                <fieldset
+                    className={`p-5 rounded-lg ${colors.panelBg} ${colors.panelShadow}`}
+                >
+                    <legend
+                        className={`px-3 py-1 text-lg font-semibold ${colors.legendBg} ${colors.legendText} rounded-md -mt-8 mb-4 inline-block ${colors.panelShadow}`}
+                    >
+                        Investment Engine
                     </legend>
-                    <div className="space-y-4 p-2">
-                        <label className="flex flex-col text-sm font-medium text-gray-700">
+                    <div className="space-y-5 p-2">
+                        <label className="flex flex-col text-sm font-medium text-gray-800">
                             Expected Annual Real Return (%)
                             <input
-                                className={`mt-1 p-2 border rounded-md focus:ring-indigo-500 focus:border-indigo-500 ${useHistorical ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                                className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500 ${useHistorical ? "opacity-50 cursor-not-allowed bg-gray-300" : ""}`}
                                 disabled={useHistorical}
                                 step="0.1"
                                 type="number"
@@ -542,17 +597,16 @@ export default function NetWorthCalculator() {
                                     setInvestmentReturn(Number(e.target.value))
                                 }
                             />
-                            <span className="text-xs text-gray-500 mt-1">
-                                Used when &quot;Use Historical&quot; is
-                                unchecked. Represents average return above
-                                inflation.
+                            <span className="text-xs text-gray-600 mt-1 italic">
+                                Used only when Historical Returns are OFF.
                             </span>
                         </label>
 
-                        <div className="flex items-start space-x-3 pt-2">
+                        {/* Custom Checkbox */}
+                        <div className="flex items-center space-x-3 pt-2 group">
                             <input
                                 checked={useHistorical}
-                                className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mt-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="appearance-none h-5 w-5 border-2 border-gray-500 rounded-sm bg-gray-100 checked:bg-sky-600 checked:border-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-stone-300 focus:ring-sky-500 relative cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed peer"
                                 disabled={!canRunHistorical}
                                 id="use-historical"
                                 type="checkbox"
@@ -560,35 +614,47 @@ export default function NetWorthCalculator() {
                                     setUseHistorical(e.target.checked)
                                 }
                             />
+                            {/* Checkmark SVG */}
+                            <svg
+                                aria-hidden="true"
+                                className="absolute w-5 h-5 hidden peer-checked:block pointer-events-none p-0.5 text-white"
+                                fill="currentColor"
+                                viewBox="0 0 20 20"
+                                xmlns="http://www.w3.org/2000/svg"
+                            >
+                                <path
+                                    clipRule="evenodd"
+                                    d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                                    fillRule="evenodd"
+                                />
+                            </svg>
+
                             <div className="flex-1">
                                 <label
-                                    className={`text-sm font-medium ${!canRunHistorical ? "text-gray-400" : "text-gray-700"}`}
+                                    className={`text-sm font-medium cursor-pointer ${!canRunHistorical ? "text-gray-500 italic" : "text-gray-800 group-hover:text-sky-700"}`}
                                     htmlFor="use-historical"
                                 >
                                     Use Historical S&P 500 Real Returns
                                 </label>
                                 {!canRunHistorical && (
-                                    <p className="text-xs text-red-600">
-                                        Age range too long for available
-                                        historical data ({realReturns.length}{" "}
-                                        years).
+                                    <p className="text-xs text-red-700 font-semibold">
+                                        Age range too long for data (
+                                        {realReturns.length} yrs max).
                                     </p>
                                 )}
                                 {canRunHistorical && (
-                                    <p className="text-xs text-gray-500">
-                                        Uses actual year-by-year
-                                        inflation-adjusted S&P 500 returns.
-                                        Enables backtesting.
+                                    <p className="text-xs text-gray-600 italic">
+                                        Also Enables Backtesting Graph.
                                     </p>
                                 )}
                             </div>
                         </div>
 
                         {useHistorical && canRunHistorical && (
-                            <label className="flex flex-col text-sm font-medium text-gray-700">
-                                Projection Start Year (for main chart)
+                            <label className="flex flex-col text-sm font-medium text-gray-800">
+                                Projection Start Year (Main Chart)
                                 <input
-                                    className="mt-1 p-2 border rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                                    className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
                                     max={maxBacktestStartYear}
                                     min={HISTORICAL_START_YEAR}
                                     type="number"
@@ -606,37 +672,42 @@ export default function NetWorthCalculator() {
                                         )
                                     }
                                 />
-                                <span className="text-xs text-gray-500 mt-1">
-                                    Select the year the historical sequence
-                                    begins for the primary projection chart
-                                    (e.g., 1980). Max possible:{" "}
-                                    {maxBacktestStartYear}.
+                                <span className="text-xs text-gray-600 mt-1 italic">
+                                    Select sequence start (
+                                    {HISTORICAL_START_YEAR}-
+                                    {maxBacktestStartYear}).
                                 </span>
                             </label>
                         )}
                     </div>
                 </fieldset>
 
-                {/* Column 3: Salary Schedule Editor */}
-                <fieldset className="border p-4 rounded-md bg-white shadow-sm">
-                    <legend className="text-lg font-semibold px-2 text-gray-700">
-                        Salary Schedule (in Today&apos;s Dollars)
+                {/* --- Column 3: Salary Schedule Editor --- */}
+                <fieldset
+                    className={`p-5 rounded-lg ${colors.panelBg} ${colors.panelShadow}`}
+                >
+                    <legend
+                        className={`px-3 py-1 text-lg font-semibold ${colors.legendBg} ${colors.legendText} rounded-md -mt-8 mb-4 inline-block ${colors.panelShadow}`}
+                    >
+                        Income Profile
                     </legend>
-                    <div className="space-y-3 p-2 max-h-96 overflow-y-auto">
+                    <div className="space-y-3 p-1 max-h-screen overflow-y-auto border border-inset border-gray-500/50 bg-stone-200/50 rounded-md shadow-inner">
                         {sortedSalarySchedule.length === 0 && (
-                            <p className="text-sm text-red-600">
-                                Please add at least one salary entry.
+                            <p className="p-4 text-center text-sm text-red-700 font-semibold">
+                                Please add at least one salary entry below.
                             </p>
                         )}
                         {sortedSalarySchedule.map((entry, index) => (
                             <div
                                 key={index}
-                                className="flex items-center space-x-2"
+                                className="grid grid-cols-[auto,1fr,auto] gap-2 items-center bg-stone-100/70 p-1.5 rounded"
                             >
-                                <label className="flex items-center text-sm">
-                                    Age:
+                                <div className="flex items-center text-sm font-medium text-gray-700">
+                                    <span className="w-8 text-right mr-1">
+                                        Age:
+                                    </span>
                                     <input
-                                        className="ml-1 p-1 border rounded-md w-16 text-right"
+                                        className={`w-14 p-1 rounded ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} text-right focus:outline-none focus:ring-1 focus:ring-sky-500`}
                                         min="0"
                                         type="number"
                                         value={entry.age}
@@ -648,11 +719,13 @@ export default function NetWorthCalculator() {
                                             )
                                         }
                                     />
-                                </label>
-                                <label className="flex items-center text-sm flex-grow">
-                                    Salary: $
+                                </div>
+                                <div className="flex items-center text-sm">
+                                    <span className="text-gray-600 font-medium mx-1">
+                                        $
+                                    </span>
                                     <input
-                                        className="ml-1 p-1 border rounded-md flex-grow text-right"
+                                        className={`w-full p-1 rounded ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} text-right focus:outline-none focus:ring-1 focus:ring-sky-500`}
                                         min="0"
                                         step="1000"
                                         type="number"
@@ -665,9 +738,9 @@ export default function NetWorthCalculator() {
                                             )
                                         }
                                     />
-                                </label>
+                                </div>
                                 <button
-                                    className="text-red-500 hover:text-red-700 text-sm font-medium p-1"
+                                    className={`w-7 h-7 flex items-center justify-center rounded ${colors.removeButtonBg} ${colors.removeButtonHoverBg} ${colors.removeButtonActiveBg} ${colors.buttonShadow} ${colors.buttonText} text-lg leading-none`}
                                     title="Remove Entry"
                                     onClick={() => removeSalaryEntry(index)}
                                 >
@@ -677,173 +750,269 @@ export default function NetWorthCalculator() {
                         ))}
                     </div>
                     <button
-                        className="mt-3 w-full text-sm bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded-md transition duration-150 ease-in-out"
+                        className={`mt-4 w-full py-2 px-4 rounded-md ${colors.buttonBg} ${colors.buttonHoverBg} ${colors.buttonActiveBg} ${colors.buttonShadow} ${colors.buttonText} transition-all duration-100 ease-in-out`}
                         onClick={addSalaryEntry}
                     >
                         Add Salary Entry
                     </button>
-                    <p className="text-xs text-gray-500 mt-2 px-2">
-                        Enter income at specific ages. The projection will use
-                        the salary from the closest preceding age entry.
+                    <p className="text-xs text-gray-600 mt-2 px-1 italic">
+                        {`Enter income at specific ages (today's dollars). Uses
+                        salary from closest prior age.`}
                     </p>
                 </fieldset>
             </div>
 
-            {/* Main Projection Chart */}
-            <div className="mt-8 bg-white p-4 rounded-md shadow">
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                    Retired Net Worth:{" "}
-                    {formatCurrency(
-                        tableData[tableData.length - 1]?.netWorth || 0,
-                    )}
-                </h2>
+            {/* --- Main Projection Chart --- */}
+            <div
+                className={`mt-10 p-6 rounded-lg ${colors.chartPanelBg} ${colors.chartPanelShadow}`}
+            >
+                <div className="flex justify-between items-center mb-5 px-2">
+                    <h2 className="text-xl font-semibold text-gray-300 text-shadow-sm shadow-black/50">
+                        Net Worth Projection Visualizer
+                    </h2>
+                    <div className="text-right">
+                        <span className="text-sm font-medium text-gray-400 block">
+                            Est. Net Worth at Age {endAge}:
+                        </span>
+                        <span
+                            className={`block text-2xl font-bold ${colors.readoutBg}`}
+                        >
+                            {formatCurrency(
+                                tableData[tableData.length - 1]?.netWorth ?? 0,
+                            )}
+                        </span>
+                    </div>
+                </div>
+
                 {tableData.length > 0 ? (
                     <ResponsiveContainer height={400} width="100%">
                         <LineChart
                             data={tableData}
-                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                            margin={{ top: 5, right: 35, left: 30, bottom: 25 }}
                         >
                             <CartesianGrid
-                                stroke="#e0e0e0"
+                                opacity={0.5}
+                                stroke="#555"
                                 strokeDasharray="3 3"
                             />
                             <XAxis
+                                axisLine={{ stroke: "#777" }}
                                 dataKey="age"
                                 label={{
                                     value: "Age",
-                                    position: "insideBottomRight",
-                                    offset: -5,
+                                    position: "insideBottom",
+                                    offset: -15,
+                                    fill: "#bbb",
+                                    fontSize: 14,
                                 }}
+                                tick={{ fill: "#bbb", fontSize: 12 }}
+                                tickLine={{ stroke: "#777" }}
                             />
                             <YAxis
+                                axisLine={{ stroke: "#777" }}
                                 domain={["auto", "auto"]}
+                                label={{
+                                    value: "Value (Today's $)",
+                                    angle: -90,
+                                    position: "insideLeft",
+                                    offset: -5,
+                                    fill: "#bbb",
+                                    fontSize: 14,
+                                }}
+                                tick={{ fill: "#bbb", fontSize: 12 }}
                                 tickFormatter={(value) =>
                                     `$${(value / 1000).toFixed(0)}k`
                                 }
+                                tickLine={{ stroke: "#777" }}
+                                width={70} // Increased width for labels
                             />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend />
+                            <Tooltip
+                                content={<CustomTooltip />}
+                                cursor={{
+                                    stroke: "red",
+                                    strokeWidth: 1,
+                                    strokeDasharray: "3 3",
+                                }}
+                            />
+                            <Legend
+                                formatter={(value) => (
+                                    <span style={{ color: "#ccc" }}>
+                                        {value}
+                                    </span>
+                                )}
+                                wrapperStyle={{ bottom: 0, left: 20 }}
+                            />
                             <Line
                                 dataKey="netWorth"
                                 dot={false}
                                 name="Net Worth"
-                                stroke="#8884d8"
-                                strokeWidth={2}
+                                stroke={colors.accentLine1}
+                                strokeWidth={3}
                                 type="monotone"
                             />
                             <Line
                                 dataKey="salary"
                                 dot={false}
                                 name="Income"
-                                stroke="#82ca9d"
-                                strokeWidth={1}
+                                stroke={colors.accentLine2}
+                                strokeDasharray="5 5"
+                                strokeWidth={1.5}
                                 type="monotone"
                             />
                             <Line
                                 dataKey="annualSavings"
                                 dot={false}
                                 name="Savings"
-                                stroke="#ffc658"
-                                strokeWidth={1}
+                                stroke={colors.accentLine3}
+                                strokeDasharray="1 3"
+                                strokeWidth={1.5}
                                 type="monotone"
                             />
                         </LineChart>
                     </ResponsiveContainer>
                 ) : (
-                    <p className="text-center text-gray-500">
-                        Enter valid parameters and at least one salary entry to
-                        see the projection.
+                    <p className="text-center text-gray-400 py-10">
+                        Configure parameters and add salary data to generate
+                        projection.
                     </p>
                 )}
             </div>
 
-            {/* Backtesting Section */}
+            {/* --- Backtesting Section --- */}
             {useHistorical && backtestStats && (
-                <div className="mt-8 bg-white p-4 rounded-md shadow">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                        Historical Backtest Results
+                <div
+                    className={`mt-10 p-6 rounded-lg ${colors.chartPanelBg} ${colors.chartPanelShadow}`}
+                >
+                    <h2 className="text-xl font-semibold text-gray-300 text-shadow-sm shadow-black/50 mb-4 px-2">
+                        Backtest Analysis
                     </h2>
-                    <p className="text-sm text-gray-600 mb-4">
-                        This shows the final net worth if your simulation period
-                        ({startAge}-{endAge}) had started in different
-                        historical years, using actual S&P 500 real returns for
-                        each period.
+                    <p className="text-sm text-gray-400 mb-6 px-2 italic">
+                        Final net worth results if your simulation ({startAge}-
+                        {endAge}) began in different historical years (
+                        {HISTORICAL_START_YEAR}-{maxBacktestStartYear}).
                     </p>
-                    <div className="text-sm mt-4 space-y-2 mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <p className="bg-green-50 p-3 rounded border border-green-200">
-                            <strong>Best Period Start:</strong>{" "}
-                            {backtestStats.best.year} <br />
+                    {/* Stats Panels */}
+                    <div className="text-xs mt-4 mb-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 px-2">
+                        <div
+                            className={`${colors.statsPanelBg} p-3 rounded-md border-green-600 bg-green-100 text-green-900`}
+                        >
+                            <strong className="block text-sm mb-1">
+                                BEST Period Start: {backtestStats.best.year}
+                            </strong>
                             Final Net Worth:{" "}
-                            <span className="font-semibold">
+                            <strong className="font-mono">
                                 {formatCurrencyDetailed(
                                     backtestStats.best.netWorth,
                                 )}
-                            </span>
-                        </p>
-                        <p className="bg-red-50 p-3 rounded border border-red-200">
-                            <strong>Worst Period Start:</strong>{" "}
-                            {backtestStats.worst.year} <br />
+                            </strong>
+                        </div>
+                        <div
+                            className={`${colors.statsPanelBg} p-3 rounded-md border-red-600 bg-red-100 text-red-900`}
+                        >
+                            <strong className="block text-sm mb-1">
+                                WORST Period Start: {backtestStats.worst.year}
+                            </strong>
                             Final Net Worth:{" "}
-                            <span className="font-semibold">
+                            <strong className="font-mono">
                                 {formatCurrencyDetailed(
                                     backtestStats.worst.netWorth,
                                 )}
-                            </span>
-                        </p>
-                        <p className="bg-blue-50 p-3 rounded border border-blue-200">
-                            <strong>Average Final Net Worth:</strong>
-                            <br />
+                            </strong>
+                        </div>
+                        <div
+                            className={`${colors.statsPanelBg} p-3 rounded-md border-blue-600 bg-blue-100 text-blue-900`}
+                        >
+                            <strong className="block text-sm mb-1">
+                                AVERAGE Final NW
+                            </strong>
                             Across all periods:{" "}
-                            <span className="font-semibold">
+                            <strong className="font-mono">
                                 {formatCurrencyDetailed(
                                     backtestStats.avgNetWorth,
                                 )}
-                            </span>
-                        </p>
-                        <p className="bg-purple-50 p-3 rounded border border-purple-200">
-                            <strong>Median Final Net Worth:</strong>
-                            <br />
+                            </strong>
+                        </div>
+                        <div
+                            className={`${colors.statsPanelBg} p-3 rounded-md border-purple-600 bg-purple-100 text-purple-900`}
+                        >
+                            <strong className="block text-sm mb-1">
+                                MEDIAN Final NW
+                            </strong>
                             Across all periods:{" "}
-                            <span className="font-semibold">
+                            <strong className="font-mono">
                                 {formatCurrencyDetailed(
                                     backtestStats.medianNetWorth,
                                 )}
-                            </span>
-                        </p>
+                            </strong>
+                        </div>
                     </div>
 
-                    <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                        Final Net Worth by Historical Start Year
+                    <h3 className="text-lg font-semibold text-gray-300 mb-3 px-2">
+                        Final Net Worth vs. Historical Start Year
                     </h3>
                     <ResponsiveContainer height={300} width="100%">
                         <LineChart
                             data={backtestStats.results}
-                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                            margin={{ top: 5, right: 35, left: 30, bottom: 25 }}
                         >
                             <CartesianGrid
-                                stroke="#e0e0e0"
+                                opacity={0.5}
+                                stroke="#555"
                                 strokeDasharray="3 3"
                             />
                             <XAxis
+                                axisLine={{ stroke: "#777" }}
                                 dataKey="year"
                                 label={{
                                     value: "Simulation Start Year",
-                                    position: "insideBottomRight",
-                                    offset: -5,
+                                    position: "insideBottom",
+                                    offset: -15,
+                                    fill: "#bbb",
+                                    fontSize: 14,
                                 }}
+                                tick={{ fill: "#bbb", fontSize: 12 }}
+                                tickLine={{ stroke: "#777" }}
                             />
                             <YAxis
+                                axisLine={{ stroke: "#777" }}
                                 domain={["auto", "auto"]}
+                                label={{
+                                    value: "Final Net Worth",
+                                    angle: -90,
+                                    position: "insideLeft",
+                                    offset: -5,
+                                    fill: "#bbb",
+                                    fontSize: 14,
+                                }}
+                                tick={{ fill: "#bbb", fontSize: 12 }}
                                 tickFormatter={(value) =>
                                     `$${(value / 1000).toFixed(0)}k`
                                 }
+                                tickLine={{ stroke: "#777" }}
+                                width={70}
                             />
-                            <Tooltip content={<BacktestCustomTooltip />} />
+                            <Tooltip
+                                content={<BacktestCustomTooltip />}
+                                cursor={{
+                                    stroke: "cyan",
+                                    strokeWidth: 1,
+                                    strokeDasharray: "3 3",
+                                }}
+                            />
+                            <Legend
+                                formatter={(value) => (
+                                    <span style={{ color: "#ccc" }}>
+                                        {value}
+                                    </span>
+                                )}
+                                wrapperStyle={{ bottom: 0, left: 20 }}
+                            />
                             <Line
                                 dataKey="netWorth"
                                 dot={false}
                                 name="Final Net Worth"
-                                stroke="#82ca9d"
+                                stroke={colors.accentLineBacktest}
+                                strokeWidth={2}
                                 type="monotone"
                             />
                         </LineChart>
@@ -853,3 +1022,21 @@ export default function NetWorthCalculator() {
         </div>
     );
 }
+
+// Add this to your global CSS or a style tag if you need text-shadow utility
+/*
+@layer utilities {
+  .text-shadow-sm {
+    text-shadow: 0 1px 2px var(--tw-shadow-color, rgba(0,0,0,0.5));
+  }
+  .text-shadow {
+    text-shadow: 0 2px 4px var(--tw-shadow-color, rgba(0,0,0,0.5));
+  }
+  .text-shadow-lg {
+    text-shadow: 0 10px 15px var(--tw-shadow-color, rgba(0,0,0,0.5));
+  }
+  .text-shadow-none {
+    text-shadow: none;
+  }
+}
+*/
