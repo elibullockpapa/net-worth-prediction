@@ -1,5 +1,5 @@
-// --- Data (Copy relevant data here) ---
-// IMPORTANT: Keep this data synchronized with your main data source (@/public/finances)
+// public/backtest.worker.js
+
 const sp500RealReturnsWithDividends = {
     2024: 0.2234, 2023: 0.1939, 2022: -0.1722, 2021: 0.1362, 2020: 0.1583,
     2019: 0.2488, 2018: -0.0607, 2017: 0.2224, 2016: 0.1801, 2015: -0.0457,
@@ -273,9 +273,9 @@ self.onmessage = function (event) {
             pSimStartYear: year,
             pSalarySchedule: sortedSalarySchedule,
             pIncludeDividends: config.includeDividends,
-            pStateTaxConfig: config.stateTaxConfig,
-            pCustomTaxRate: config.customTaxRate,
-            pCustomStandardDeduction: config.customStandardDeduction
+            pStateTaxConfig: config.stateTaxConfig || stateTaxConfigs[0], // Provide default if not set
+            pCustomTaxRate: config.customTaxRate || 0,
+            pCustomStandardDeduction: config.customStandardDeduction || 0
         };
 
         const resultData = generateProjection(projectionConfig);
@@ -317,5 +317,36 @@ self.onmessage = function (event) {
         }
     }
 
-    self.postMessage(results);
+    // Calculate percentiles
+    const sortedResults = [...results].sort((a, b) => a.netWorth - b.netWorth);
+    const N = sortedResults.length;
+
+    const calculatePercentile = (p) => {
+        if (p === 0) return sortedResults[0].netWorth;
+        if (p === 100) return sortedResults[N - 1].netWorth;
+
+        const index = (p / 100) * (N - 1);
+        const lowerIndex = Math.floor(index);
+        const upperIndex = Math.ceil(index);
+        const weight = index - lowerIndex;
+
+        if (upperIndex >= N) return sortedResults[N - 1].netWorth;
+
+        const lowerValue = sortedResults[lowerIndex].netWorth;
+        const upperValue = sortedResults[upperIndex].netWorth;
+
+        return lowerValue + weight * (upperValue - lowerValue);
+    };
+
+    // Use custom percentiles if provided, otherwise use defaults
+    const percentilesToCalculate = config.percentiles || [10, 50];
+    const percentiles = percentilesToCalculate.map(p => ({
+        percentile: p,
+        value: calculatePercentile(p)
+    }));
+
+    self.postMessage({
+        results,
+        percentiles
+    });
 }; 

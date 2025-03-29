@@ -1,3 +1,5 @@
+// components/net-worth-calculator.tsx
+
 "use client";
 
 import React, {
@@ -14,9 +16,10 @@ import {
     YAxis,
     CartesianGrid,
     Tooltip,
-    Legend,
     ResponsiveContainer,
     TooltipProps,
+    ScatterChart,
+    Scatter,
 } from "recharts";
 import {
     NameType,
@@ -30,6 +33,85 @@ import {
     sp500RealReturnsNoDividends,
 } from "@/public/finances";
 import { stateTaxConfigs, type StateTaxConfig } from "@/public/state-taxes";
+
+// --- Extracted PercentileConfigPopover Component ---
+interface PercentileConfigPopoverProps {
+    isOpen: boolean;
+    setIsOpen: (isOpen: boolean) => void;
+    initialValue: string;
+    onApply: (value: string) => void;
+    colors: typeof colors;
+}
+
+const PercentileConfigPopover: React.FC<PercentileConfigPopoverProps> = ({
+    isOpen,
+    setIsOpen,
+    initialValue,
+    onApply,
+    colors,
+}) => {
+    const [localValue, setLocalValue] = useState(initialValue);
+
+    // Sync local state if the initialValue prop changes
+    useEffect(() => {
+        setLocalValue(initialValue);
+    }, [initialValue]);
+
+    const handleApplyClick = () => {
+        onApply(localValue);
+        setIsOpen(false);
+    };
+
+    const handleCancelClick = () => {
+        setLocalValue(initialValue);
+        setIsOpen(false);
+    };
+
+    return (
+        <div className="relative">
+            <button
+                className={`px-3 py-1 text-sm rounded ${colors.buttonBg} ${colors.buttonHoverBg} ${colors.buttonActiveBg} ${colors.buttonShadow} ${colors.buttonText}`}
+                onClick={() => setIsOpen(!isOpen)}
+            >
+                Configure Percentiles
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 mt-2 w-80 p-4 bg-white rounded-lg shadow-lg z-50 border border-gray-300">
+                    <div className="space-y-4">
+                        <h3 className="text-lg font-semibold text-gray-900">
+                            Configure Percentile Markers
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                            Enter desired percentiles (0-100) separated by
+                            commas.
+                        </p>
+                        <input
+                            className={`w-full p-2 rounded ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-sky-500`}
+                            placeholder="e.g., 10, 50, 90"
+                            type="text"
+                            value={localValue}
+                            onChange={(e) => setLocalValue(e.target.value)}
+                        />
+                        <div className="flex justify-end space-x-2">
+                            <button
+                                className={`px-3 py-1 text-sm rounded ${colors.buttonBg} ${colors.buttonHoverBg} ${colors.buttonActiveBg} ${colors.buttonShadow} ${colors.buttonText} bg-gray-500 hover:bg-gray-600 active:bg-gray-700`}
+                                onClick={handleCancelClick}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                className={`px-3 py-1 text-sm rounded ${colors.buttonBg} ${colors.buttonHoverBg} ${colors.buttonActiveBg} ${colors.buttonShadow} ${colors.buttonText}`}
+                                onClick={handleApplyClick}
+                            >
+                                Apply
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 // Define retro color palette (adjust as needed)
 const colors = {
@@ -169,12 +251,14 @@ interface SalaryEntry {
 }
 interface ProjectionData {
     age: number;
+    year: number;
     salary: number;
     totalTax: number;
     afterTaxIncome: number;
     annualSavings: number;
     livingMoney: number;
     returnRate: number;
+    usedFallback: boolean;
     netWorth: number;
 }
 interface BacktestResult {
@@ -193,6 +277,21 @@ interface SimulationConfig {
     pSimStartYear: number;
     pInvestmentReturn: number;
     pSalarySchedule: SalaryEntry[];
+    pIncludeDividends: boolean;
+    pStateTaxConfig: StateTaxConfig;
+    pCustomTaxRate: number;
+    pCustomStandardDeduction: number;
+    percentiles?: number[];
+}
+
+interface PercentileMarker {
+    percentile: number;
+    value: number;
+}
+
+interface WorkerResponse {
+    results: BacktestResult[];
+    percentiles: PercentileMarker[];
 }
 
 // --- Custom Tooltips (Skeuomorphic Style) ---
@@ -200,16 +299,22 @@ const CustomTooltip = ({
     active,
     payload,
     label,
-}: TooltipProps<ValueType, NameType>) => {
+    historicalStartYear,
+    startAge,
+}: TooltipProps<ValueType, NameType> & {
+    historicalStartYear: number;
+    startAge: number;
+}) => {
     if (active && payload && payload.length) {
         const data = payload[0].payload;
+        const year = historicalStartYear + (data.age - startAge);
 
         return (
             <div
                 className={`${colors.tooltipBg} p-3 rounded ${colors.tooltipText}`}
             >
                 <p className="font-bold text-base mb-2 border-b border-amber-600 pb-1">
-                    Age: {label}
+                    Age: {label} ({year})
                 </p>
                 <div className="space-y-1 text-sm font-medium">
                     <p>
@@ -258,7 +363,7 @@ const BacktestCustomTooltip = ({
                 className={`${colors.tooltipBg} p-3 rounded ${colors.tooltipText}`}
             >
                 <p className="font-bold text-base mb-2 border-b border-amber-600 pb-1">
-                    Start Year: {label}
+                    Start Year: {data.year}
                 </p>
                 <div className="space-y-1 text-sm font-medium">
                     <p>
@@ -325,6 +430,7 @@ const AgeRangeSlider: React.FC<AgeRangeSliderProps> = ({
             </div>
             <div className="relative py-2">
                 <Slider
+                    aria-label="Age range selector"
                     classNames={{
                         base: "w-full",
                         track: "h-3 rounded-full bg-gradient-to-b from-stone-400 to-stone-500",
@@ -334,7 +440,7 @@ const AgeRangeSlider: React.FC<AgeRangeSliderProps> = ({
                     }}
                     maxValue={100}
                     minValue={18}
-                    step={1} // Changed from 5 to 1 for smoother sliding
+                    step={1}
                     value={[startAge, endAge]}
                     onChange={(value) => {
                         if (Array.isArray(value)) {
@@ -349,6 +455,15 @@ const AgeRangeSlider: React.FC<AgeRangeSliderProps> = ({
             </div>
         </div>
     );
+};
+
+// --- Helper Functions ---
+const parsePercentileInput = (input: string): number[] => {
+    return input
+        .split(",")
+        .map((s) => parseFloat(s.trim()))
+        .filter((n) => !isNaN(n) && n >= 0 && n <= 100)
+        .sort((a, b) => a - b);
 };
 
 export default function NetWorthCalculator() {
@@ -391,6 +506,13 @@ export default function NetWorthCalculator() {
     const [debouncedFallbackRate] = useDebounce(fallbackRealReturnRate, 500);
     const [debouncedSalarySchedule] = useDebounce(salarySchedule, 500);
     const [debouncedIncludeDividends] = useDebounce(includeDividends, 500);
+    const [debouncedSelectedStateTax] = useDebounce(selectedStateTax, 500);
+    const [debouncedIsCustomTax] = useDebounce(isCustomTax, 500);
+    const [debouncedCustomTaxRate] = useDebounce(customTaxRate, 500);
+    const [debouncedCustomStandardDeduction] = useDebounce(
+        customStandardDeduction,
+        500,
+    );
 
     // --- Memoized Sorted Salary Schedule ---
     const sortedSalarySchedule = useMemo(
@@ -398,66 +520,81 @@ export default function NetWorthCalculator() {
         [salarySchedule],
     );
 
+    // --- New state for percentiles ---
+    const [percentiles, setPercentiles] = useState<PercentileMarker[]>([]);
+    const [isPercentileConfigOpen, setIsPercentileConfigOpen] = useState(false);
+    const [percentileInput, setPercentileInput] = useState("10, 50, 90");
+
     // --- Worker Initialization and Termination ---
     useEffect(() => {
-        // Initialize worker
+        console.log("Initializing worker...");
         workerRef.current = new Worker("/backtest.worker.js");
 
-        // Handle messages from worker
-        workerRef.current.onmessage = (event) => {
-            console.log("Main thread received results:", event.data.length);
-            setBacktestRawResults(event.data);
+        workerRef.current.onmessage = (event: MessageEvent<WorkerResponse>) => {
+            console.log(
+                "Main thread received results:",
+                event.data.results.length,
+                "percentiles:",
+                event.data.percentiles,
+            );
+            setBacktestRawResults(event.data.results);
+            setPercentiles(event.data.percentiles);
             setIsBacktesting(false);
         };
 
-        // Handle worker errors
         workerRef.current.onerror = (error) => {
             console.error("Worker error:", error);
             setIsBacktesting(false);
         };
 
         // Trigger initial calculation
-        setIsBacktesting(true);
-        workerRef.current.postMessage({
+        const initialParsedPercentiles = parsePercentileInput(percentileInput);
+        const initialConfig: SimulationConfig = {
             pStartAge: startAge,
             pEndAge: endAge,
             pInitialCash: initialCash,
             pSavingsRate: savingsRate,
             pInvestmentReturn: fallbackRealReturnRate,
             pSalarySchedule: sortedSalarySchedule,
-            includeDividends: includeDividends,
-            stateTaxConfig: selectedStateTax,
-            customTaxRate: isCustomTax ? customTaxRate : 0,
-            customStandardDeduction: isCustomTax ? customStandardDeduction : 0,
-        });
+            pIncludeDividends: includeDividends,
+            pStateTaxConfig: selectedStateTax,
+            pCustomTaxRate: isCustomTax ? customTaxRate : 0,
+            pCustomStandardDeduction: isCustomTax ? customStandardDeduction : 0,
+            pSimStartYear: 0,
+            percentiles: initialParsedPercentiles,
+        };
 
-        // Cleanup function to terminate worker on component unmount
+        console.log("Sending initial config to worker:", initialConfig);
+        workerRef.current.postMessage(initialConfig);
+
         return () => {
             console.log("Terminating worker");
             workerRef.current?.terminate();
             workerRef.current = null;
         };
-    }, []); // Run only once on mount to initialize
+    }, []); // Run only once on mount
 
     // --- Effect to Trigger Worker on Debounced Input Changes ---
     useEffect(() => {
         if (!workerRef.current) {
-            console.log("Worker not ready, skipping calculation");
+            console.log("Worker not ready, skipping debounced update");
 
             return;
         }
 
-        // Only run if salary schedule is valid
         if (debouncedSalarySchedule.length === 0) {
             setBacktestRawResults([]);
-            setIsBacktesting(false);
+            setPercentiles([]);
 
             return;
         }
 
         console.log("Triggering worker calculation with debounced values");
         setIsBacktesting(true);
-        const config = {
+
+        const currentParsedPercentiles = parsePercentileInput(percentileInput);
+
+        const config: SimulationConfig = {
             pStartAge: debouncedStartAge,
             pEndAge: debouncedEndAge,
             pInitialCash: debouncedInitialCash,
@@ -466,13 +603,32 @@ export default function NetWorthCalculator() {
             pSalarySchedule: [...debouncedSalarySchedule].sort(
                 (a, b) => a.age - b.age,
             ),
-            includeDividends: debouncedIncludeDividends,
-            stateTaxConfig: selectedStateTax,
-            customTaxRate: isCustomTax ? customTaxRate : 0,
-            customStandardDeduction: isCustomTax ? customStandardDeduction : 0,
+            pIncludeDividends: debouncedIncludeDividends,
+            pStateTaxConfig: debouncedSelectedStateTax,
+            pCustomTaxRate: debouncedIsCustomTax ? debouncedCustomTaxRate : 0,
+            pCustomStandardDeduction: debouncedIsCustomTax
+                ? debouncedCustomStandardDeduction
+                : 0,
+            pSimStartYear: 0,
+            percentiles: currentParsedPercentiles,
         };
 
-        workerRef.current.postMessage(config);
+        const timeoutId = setTimeout(() => {
+            console.log("Sending debounced config to worker:", config);
+            workerRef.current?.postMessage({
+                ...config,
+                stateTaxConfig: debouncedSelectedStateTax,
+                customTaxRate: debouncedIsCustomTax
+                    ? debouncedCustomTaxRate
+                    : 0,
+                customStandardDeduction: debouncedIsCustomTax
+                    ? debouncedCustomStandardDeduction
+                    : 0,
+                includeDividends: debouncedIncludeDividends,
+            });
+        }, 100); // Add small delay to prevent rapid re-calculations
+
+        return () => clearTimeout(timeoutId);
     }, [
         debouncedStartAge,
         debouncedEndAge,
@@ -481,11 +637,67 @@ export default function NetWorthCalculator() {
         debouncedFallbackRate,
         debouncedSalarySchedule,
         debouncedIncludeDividends,
-        selectedStateTax,
-        isCustomTax,
-        customTaxRate,
-        customStandardDeduction,
+        debouncedSelectedStateTax,
+        debouncedIsCustomTax,
+        debouncedCustomTaxRate,
+        debouncedCustomStandardDeduction,
+        percentileInput,
     ]);
+
+    // --- Callback for Applying Percentiles from Popover ---
+    const handleApplyPercentiles = useCallback(
+        (newInputString: string) => {
+            const uniqueSortedNums = parsePercentileInput(newInputString);
+            const formattedString = uniqueSortedNums.join(", ");
+
+            setPercentileInput(formattedString);
+            setIsPercentileConfigOpen(false);
+
+            if (workerRef.current) {
+                console.log(
+                    "Applying new percentiles and triggering worker:",
+                    uniqueSortedNums,
+                );
+                setIsBacktesting(true);
+
+                const config: SimulationConfig = {
+                    pStartAge: startAge,
+                    pEndAge: endAge,
+                    pInitialCash: initialCash,
+                    pSavingsRate: savingsRate,
+                    pInvestmentReturn: fallbackRealReturnRate,
+                    pSalarySchedule: sortedSalarySchedule,
+                    pIncludeDividends: includeDividends,
+                    pStateTaxConfig: selectedStateTax,
+                    pCustomTaxRate: isCustomTax ? customTaxRate : 0,
+                    pCustomStandardDeduction: isCustomTax
+                        ? customStandardDeduction
+                        : 0,
+                    pSimStartYear: 0,
+                    percentiles: uniqueSortedNums,
+                };
+
+                console.log(
+                    "Sending config after applying percentiles:",
+                    config,
+                );
+                workerRef.current.postMessage(config);
+            }
+        },
+        [
+            startAge,
+            endAge,
+            initialCash,
+            savingsRate,
+            fallbackRealReturnRate,
+            sortedSalarySchedule,
+            includeDividends,
+            selectedStateTax,
+            isCustomTax,
+            customTaxRate,
+            customStandardDeduction,
+        ],
+    );
 
     // --- Salary Schedule Handlers (Unchanged) ---
     const handleSalaryChange = useCallback(
@@ -531,95 +743,10 @@ export default function NetWorthCalculator() {
         );
     }, []);
 
-    // --- Main Projection Logic (Still runs synchronously for the single chart) ---
-    const localGetRealReturn = useCallback(
-        (year: number) => {
-            return getRealReturn(year, includeDividends);
-        },
-        [includeDividends],
-    );
-
-    const generateProjection = useCallback(
-        (simConfig: SimulationConfig): ProjectionData[] => {
-            const {
-                pStartAge,
-                pEndAge,
-                pInitialCash,
-                pSavingsRate,
-                pSimStartYear,
-                pInvestmentReturn,
-                pSalarySchedule,
-            } = simConfig;
-
-            if (pSalarySchedule.length === 0) return [];
-
-            let netWorth = pInitialCash;
-            const projectionData: ProjectionData[] = [];
-            const simulationYears = pEndAge - pStartAge + 1;
-            const sortedSchedule = [...pSalarySchedule].sort(
-                (a, b) => a.age - b.age,
-            );
-
-            let salaryCache: { [key: number]: number } = {};
-            const getSalaryForAge = (age: number) => {
-                if (salaryCache[age] !== undefined) return salaryCache[age];
-                let currentSalary = sortedSchedule[0]?.salary ?? 0;
-
-                for (let j = sortedSchedule.length - 1; j >= 0; j--) {
-                    if (age >= sortedSchedule[j].age) {
-                        currentSalary = sortedSchedule[j].salary;
-                        break;
-                    }
-                }
-                salaryCache[age] = currentSalary;
-
-                return currentSalary;
-            };
-
-            for (let i = 0; i < simulationYears; i++) {
-                const currentAge = pStartAge + i;
-                const currentYear = pSimStartYear + i;
-                const currentSalary = getSalaryForAge(currentAge);
-
-                const stateTax = virginiaTaxRate(currentSalary);
-                const fedTax = federalTaxRate(currentSalary);
-                const totalTax = stateTax + fedTax;
-                const afterTaxIncome = Math.max(0, currentSalary - totalTax);
-                const annualSavings = afterTaxIncome * (pSavingsRate / 100);
-                const livingMoney = afterTaxIncome - annualSavings;
-
-                const historicalReturn = localGetRealReturn(currentYear);
-                const returnRate =
-                    historicalReturn !== 0
-                        ? historicalReturn
-                        : pInvestmentReturn;
-
-                const growthFactor = 1 + returnRate / 100;
-
-                netWorth = netWorth * growthFactor + annualSavings;
-
-                projectionData.push({
-                    age: currentAge,
-                    salary: currentSalary,
-                    totalTax,
-                    afterTaxIncome,
-                    annualSavings,
-                    livingMoney,
-                    returnRate,
-                    netWorth: Math.max(0, netWorth),
-                });
-            }
-
-            return projectionData;
-        },
-        [localGetRealReturn],
-    );
-
-    // --- Main Projection Data (Remains synchronous, uses main thread data) ---
-    const tableData = useMemo(() => {
-        if (startAge > endAge || sortedSalarySchedule.length === 0) return [];
-
-        return generateProjection({
+    // --- Main Projection Logic (Synchronous for the single detailed chart) ---
+    const generateLocalProjection = useCallback((): ProjectionData[] => {
+        // Use non-debounced values for immediate reflection in the main chart
+        const config: SimulationConfig = {
             pStartAge: startAge,
             pEndAge: endAge,
             pInitialCash: initialCash,
@@ -627,7 +754,125 @@ export default function NetWorthCalculator() {
             pSimStartYear: historicalStartYear,
             pInvestmentReturn: fallbackRealReturnRate,
             pSalarySchedule: sortedSalarySchedule,
-        });
+            pIncludeDividends: includeDividends,
+            pStateTaxConfig: selectedStateTax,
+            pCustomTaxRate: isCustomTax ? customTaxRate : 0,
+            pCustomStandardDeduction: isCustomTax ? customStandardDeduction : 0,
+            percentiles: parsePercentileInput(percentileInput),
+        };
+
+        if (config.pSalarySchedule.length === 0) return [];
+
+        let netWorth = config.pInitialCash;
+        const projectionData: ProjectionData[] = [];
+        const simulationYears = config.pEndAge - config.pStartAge + 1;
+
+        // Cache salary lookup per age
+        let salaryCache: { [key: number]: number } = {};
+        const getSalaryForAge = (age: number) => {
+            if (salaryCache[age] !== undefined) return salaryCache[age];
+            let currentSalary = config.pSalarySchedule[0]?.salary ?? 0;
+
+            for (let j = config.pSalarySchedule.length - 1; j >= 0; j--) {
+                if (age >= config.pSalarySchedule[j].age) {
+                    currentSalary = config.pSalarySchedule[j].salary;
+                    break;
+                }
+            }
+            salaryCache[age] = currentSalary;
+
+            return currentSalary;
+        };
+
+        // Use state tax calculation logic consistent with the worker
+        const calculateStateTax = (income: number): number => {
+            const taxConfig = config.pStateTaxConfig;
+
+            if (taxConfig.name === "Custom") {
+                const taxable = Math.max(
+                    0,
+                    income - config.pCustomStandardDeduction,
+                );
+
+                return taxable * (config.pCustomTaxRate / 100);
+            }
+            if (!taxConfig.brackets.length) return 0;
+
+            let taxableIncome = income;
+
+            if (taxConfig.standardDeduction) {
+                taxableIncome = Math.max(
+                    0,
+                    income - taxConfig.standardDeduction,
+                );
+            }
+            let totalTax = 0;
+            let incomeCovered = 0;
+
+            for (const bracket of taxConfig.brackets) {
+                const bracketMin = bracket.minIncome ?? 0;
+
+                if (taxableIncome <= bracketMin) break;
+
+                const incomeInBracket = bracket.maxIncome
+                    ? Math.min(taxableIncome, bracket.maxIncome) - bracketMin
+                    : taxableIncome - bracketMin;
+
+                if (incomeInBracket > 0) {
+                    totalTax += incomeInBracket * bracket.rate;
+                }
+                if (bracket.maxIncome === undefined) break;
+            }
+
+            return totalTax;
+        };
+
+        for (let i = 0; i < simulationYears; i++) {
+            const currentAge = config.pStartAge + i;
+            const currentYear = config.pSimStartYear + i;
+            const currentSalary = getSalaryForAge(currentAge);
+
+            const stateTax = calculateStateTax(currentSalary);
+            const fedTax = federalTaxRate(currentSalary);
+            const totalTax = stateTax + fedTax;
+            const afterTaxIncome = Math.max(0, currentSalary - totalTax);
+            const annualSavings = afterTaxIncome * (config.pSavingsRate / 100);
+            const livingMoney = afterTaxIncome - annualSavings;
+
+            // Use the same return logic as the worker
+            const dataSet = config.pIncludeDividends
+                ? sp500RealReturnsWithDividends
+                : sp500RealReturnsNoDividends;
+            const historicalReturnDecimal = dataSet[currentYear];
+            let returnRate: number;
+            let usedFallback = false;
+
+            if (historicalReturnDecimal !== undefined) {
+                returnRate = historicalReturnDecimal * 100;
+            } else {
+                returnRate = config.pInvestmentReturn;
+                usedFallback = true;
+            }
+
+            const growthFactor = 1 + returnRate / 100;
+
+            netWorth = netWorth * growthFactor + annualSavings;
+
+            projectionData.push({
+                age: currentAge,
+                year: currentYear,
+                salary: currentSalary,
+                totalTax,
+                afterTaxIncome,
+                annualSavings,
+                livingMoney,
+                returnRate,
+                usedFallback,
+                netWorth: Math.max(0, netWorth),
+            });
+        }
+
+        return projectionData;
     }, [
         startAge,
         endAge,
@@ -636,7 +881,28 @@ export default function NetWorthCalculator() {
         historicalStartYear,
         fallbackRealReturnRate,
         sortedSalarySchedule,
-        generateProjection,
+        includeDividends,
+        selectedStateTax,
+        isCustomTax,
+        customTaxRate,
+        customStandardDeduction,
+        percentileInput,
+    ]);
+
+    // --- Main Projection Data (Remains synchronous, uses main thread data) ---
+    const tableData = useMemo(() => {
+        if (startAge > endAge || sortedSalarySchedule.length === 0) return [];
+
+        return generateLocalProjection();
+    }, [
+        startAge,
+        endAge,
+        initialCash,
+        savingsRate,
+        historicalStartYear,
+        fallbackRealReturnRate,
+        sortedSalarySchedule,
+        generateLocalProjection,
     ]);
 
     // --- Process Backtest Results (Fast calculation based on worker output) ---
@@ -705,7 +971,7 @@ export default function NetWorthCalculator() {
                 <strong className="font-semibold text-amber-950">
                     {`today's dollars`}
                 </strong>
-                . The projection utilizes historical{" "}
+                . The backtesting utilizes historical{" "}
                 <strong className="font-semibold text-amber-950">real</strong>{" "}
                 {`(inflation-adjusted) returns. The final net worth is also presented in today's purchasing power.`}
             </p>
@@ -738,13 +1004,23 @@ export default function NetWorthCalculator() {
                                 setter: setInitialCash,
                                 min: 0,
                                 type: "text",
-                                onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
-                                    const value = e.target.value.replace(/[^0-9]/g, '');
+                                onChange: (
+                                    e: React.ChangeEvent<HTMLInputElement>,
+                                ) => {
+                                    const value = e.target.value.replace(
+                                        /[^0-9]/g,
+                                        "",
+                                    );
+
                                     setInitialCashInput(value);
                                 },
                                 onBlur: () => {
-                                    setInitialCash(initialCashInput ? parseInt(initialCashInput) : 0);
-                                }
+                                    setInitialCash(
+                                        initialCashInput
+                                            ? parseInt(initialCashInput)
+                                            : 0,
+                                    );
+                                },
                             },
                             {
                                 label: "Savings Rate (% After-Tax)",
@@ -754,29 +1030,59 @@ export default function NetWorthCalculator() {
                                 max: 100,
                                 step: 1,
                             },
-                        ].map(({ label, value, setter, min, max, step, type, onChange, onBlur }) => (
-                            <label
-                                key={label}
-                                className="flex flex-col text-sm font-medium text-gray-800"
-                            >
-                                {label}
-                                <input
-                                    className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
-                                    max={max}
-                                    min={min}
-                                    step={step}
-                                    type={type || "number"}
-                                    value={value}
-                                    onChange={onChange || ((e) => {
-                                        let numVal = Number(e.target.value);
-                                        if (min !== undefined) numVal = Math.max(min, numVal);
-                                        if (max !== undefined) numVal = Math.min(max, numVal);
-                                        setter(isNaN(numVal) ? (min ?? 0) : numVal);
-                                    })}
-                                    onBlur={onBlur}
-                                />
-                            </label>
-                        ))}
+                        ].map(
+                            ({
+                                label,
+                                value,
+                                setter,
+                                min,
+                                max,
+                                step,
+                                type,
+                                onChange,
+                                onBlur,
+                            }) => (
+                                <label
+                                    key={label}
+                                    className="flex flex-col text-sm font-medium text-gray-800"
+                                >
+                                    {label}
+                                    <input
+                                        className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
+                                        max={max}
+                                        min={min}
+                                        step={step}
+                                        type={type || "number"}
+                                        value={value}
+                                        onBlur={onBlur}
+                                        onChange={
+                                            onChange ||
+                                            ((e) => {
+                                                let numVal = Number(
+                                                    e.target.value,
+                                                );
+
+                                                if (min !== undefined)
+                                                    numVal = Math.max(
+                                                        min,
+                                                        numVal,
+                                                    );
+                                                if (max !== undefined)
+                                                    numVal = Math.min(
+                                                        max,
+                                                        numVal,
+                                                    );
+                                                setter(
+                                                    isNaN(numVal)
+                                                        ? (min ?? 0)
+                                                        : numVal,
+                                                );
+                                            })
+                                        }
+                                    />
+                                </label>
+                            ),
+                        )}
 
                         {/* Dividend Reinvestment Toggle */}
                         <div className="flex items-center space-x-3 pt-2 group">
@@ -1059,130 +1365,55 @@ export default function NetWorthCalculator() {
 
                 {backtestStats && (
                     <>
-                        <p className="text-sm text-gray-400 mb-6 px-2 italic">
-                            Final net worth results if your simulation (
-                            {startAge}-{endAge}) began in different historical
-                            years ({HISTORICAL_START_YEAR}-2024). Only shows
-                            results where the simulation period ends in 2024 or
-                            earlier. Recalculates automatically after changes.
-                        </p>
-
-                        {/* Stats Panels */}
-                        <div className="text-xs mt-4 mb-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 px-2">
-                            <div className="bg-gray-900/90 rounded-md border border-green-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(0,255,0,0.1)]">
-                                <strong className="block text-green-400 font-bold mb-1 text-sm">
-                                    BEST Period Start: {backtestStats.best.year}
-                                </strong>
-                                <div className="bg-black/50 p-2 rounded shadow-inner">
-                                    <span className="text-green-600 text-xs">
-                                        Final Net Worth:
-                                    </span>
-                                    <strong className="block font-mono text-green-400 text-lg tracking-wider mt-1">
-                                        {formatCurrencyDetailed(
-                                            backtestStats.best.netWorth,
-                                        )}
-                                    </strong>
-                                </div>
-                            </div>
-                            <div className="bg-gray-900/90 rounded-md border border-red-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(255,0,0,0.1)]">
-                                <strong className="block text-red-400 font-bold mb-1 text-sm">
-                                    WORST Period Start:{" "}
-                                    {backtestStats.worst.year}
-                                </strong>
-                                <div className="bg-black/50 p-2 rounded shadow-inner">
-                                    <span className="text-red-600 text-xs">
-                                        Final Net Worth:
-                                    </span>
-                                    <strong className="block font-mono text-red-400 text-lg tracking-wider mt-1">
-                                        {formatCurrencyDetailed(
-                                            backtestStats.worst.netWorth,
-                                        )}
-                                    </strong>
-                                </div>
-                            </div>
-                            <div className="bg-gray-900/90 rounded-md border border-blue-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(0,0,255,0.1)]">
-                                <strong className="block text-blue-400 font-bold mb-1 text-sm">
-                                    AVERAGE Final NW
-                                </strong>
-                                <div className="bg-black/50 p-2 rounded shadow-inner">
-                                    <span className="text-blue-600 text-xs">
-                                        Across all periods:
-                                    </span>
-                                    <strong className="block font-mono text-blue-400 text-lg tracking-wider mt-1">
-                                        {formatCurrencyDetailed(
-                                            backtestStats.avgNetWorth,
-                                        )}
-                                    </strong>
-                                </div>
-                            </div>
-                            <div className="bg-gray-900/90 rounded-md border border-purple-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(128,0,255,0.1)]">
-                                <strong className="block text-purple-400 font-bold mb-1 text-sm">
-                                    MEDIAN Final NW
-                                </strong>
-                                <div className="bg-black/50 p-2 rounded shadow-inner">
-                                    <span className="text-purple-600 text-xs">
-                                        Across all periods:
-                                    </span>
-                                    <strong className="block font-mono text-purple-400 text-lg tracking-wider mt-1">
-                                        {formatCurrencyDetailed(
-                                            backtestStats.medianNetWorth,
-                                        )}
-                                    </strong>
-                                </div>
-                            </div>
+                        <div className="flex justify-between items-center mb-4">
+                            <p className="text-sm text-gray-400 italic">
+                                Final net worth results if your simulation (
+                                {startAge}-{endAge}) began in different
+                                historical years ({HISTORICAL_START_YEAR}-2024).
+                            </p>
+                            <PercentileConfigPopover
+                                colors={colors}
+                                initialValue={percentileInput}
+                                isOpen={isPercentileConfigOpen}
+                                setIsOpen={setIsPercentileConfigOpen}
+                                onApply={handleApplyPercentiles}
+                            />
                         </div>
 
-                        <h3 className="text-lg font-semibold text-gray-300 mb-3 px-2">
-                            Final Net Worth vs. Historical Start Year
-                        </h3>
-                        <ResponsiveContainer height={300} width="100%">
-                            <LineChart
-                                data={backtestStats.results.filter(
-                                    (r) => r.year + (endAge - startAge) <= 2024,
-                                )}
+                        {/* Bubble Chart */}
+                        <ResponsiveContainer height={150} width="100%">
+                            <ScatterChart
                                 margin={{
-                                    top: 5,
-                                    right: 35,
+                                    top: 40,
+                                    right: 30,
+                                    bottom: 20,
                                     left: 30,
-                                    bottom: 25,
                                 }}
                             >
                                 <CartesianGrid
-                                    opacity={0.5}
+                                    horizontal={false}
                                     stroke="#555"
                                     strokeDasharray="3 3"
                                 />
                                 <XAxis
                                     axisLine={{ stroke: "#777" }}
-                                    dataKey="year"
-                                    label={{
-                                        value: "Simulation Start Year",
-                                        position: "insideBottom",
-                                        offset: -15,
-                                        fill: "#bbb",
-                                        fontSize: 14,
-                                    }}
-                                    tick={{ fill: "#bbb", fontSize: 12 }}
-                                    tickLine={{ stroke: "#777" }}
-                                />
-                                <YAxis
-                                    axisLine={{ stroke: "#777" }}
-                                    domain={["auto", "auto"]}
-                                    label={{
-                                        value: "Final Net Worth",
-                                        angle: -90,
-                                        position: "insideLeft",
-                                        offset: -5,
-                                        fill: "#bbb",
-                                        fontSize: 14,
-                                    }}
-                                    tick={{ fill: "#bbb", fontSize: 12 }}
+                                    dataKey="netWorth"
+                                    domain={["dataMin", "dataMax"]}
+                                    height={40}
+                                    interval="preserveStartEnd"
+                                    name="Final Net Worth"
+                                    tick={{ fill: "#bbb", fontSize: 10 }}
                                     tickFormatter={(value) =>
-                                        `$${(value / 1000).toFixed(0)}k`
+                                        formatCurrency(value)
                                     }
                                     tickLine={{ stroke: "#777" }}
-                                    width={70}
+                                    ticks={[
+                                        backtestStats.worst.netWorth,
+                                        backtestStats.best.netWorth,
+                                    ]}
+                                    type="number"
                                 />
+                                <YAxis dataKey="y" hide={true} type="number" />
                                 <Tooltip
                                     content={
                                         <BacktestCustomTooltip
@@ -1191,30 +1422,128 @@ export default function NetWorthCalculator() {
                                             }
                                         />
                                     }
-                                    cursor={{
-                                        stroke: "cyan",
-                                        strokeWidth: 1,
-                                        strokeDasharray: "3 3",
+                                    cursor={{ strokeDasharray: "3 3" }}
+                                />
+                                {/* Main scatter points (rendered last, so they appear on top) */}
+                                <Scatter
+                                    data={backtestStats.results.map((r) => ({
+                                        ...r,
+                                        y: 0,
+                                    }))}
+                                    fill={colors.accentLineBacktest}
+                                    name="Backtest Runs"
+                                    shape="circle"
+                                    r={4}
+                                />
+                                {/* Percentile markers (rendered first, so they appear below) */}
+                                <Scatter
+                                    data={percentiles.map(({ percentile, value }) => ({
+                                        netWorth: value,
+                                        y: 0,
+                                        isPercentile: true,
+                                        percentile: percentile,
+                                    }))}
+                                    fill="#FFF"
+                                    label={{
+                                        dataKey: (entry) => [
+                                            `${entry.percentile}% ` +
+                                            `${entry.netWorth >= 1000000000
+                                                ? `${(entry.netWorth / 1000000000).toPrecision(3)}B`
+                                                : entry.netWorth >= 1000000
+                                                    ? `${(entry.netWorth / 1000000).toPrecision(3)}M`
+                                                    : `${(entry.netWorth / 1000).toPrecision(3)}K`}`
+                                        ],
+                                        position: "top",
+                                        fill: "#ddd",
+                                        fontSize: 10,
+                                        dy: -10,
                                     }}
-                                />
-                                <Legend
-                                    formatter={(value) => (
-                                        <span style={{ color: "#ccc" }}>
-                                            {value}
-                                        </span>
-                                    )}
-                                    wrapperStyle={{ bottom: 0, left: 20 }}
-                                />
-                                <Line
-                                    dataKey="netWorth"
-                                    dot={false}
-                                    name="Final Net Worth"
+                                    shape="circle"
                                     stroke={colors.accentLineBacktest}
                                     strokeWidth={2}
-                                    type="monotone"
+                                    r={8}
                                 />
-                            </LineChart>
+                            </ScatterChart>
                         </ResponsiveContainer>
+
+                        {/* Original Line Chart */}
+                        <div className="mt-8">
+                            <h3 className="text-lg font-semibold text-gray-300 mb-3 px-2">
+                                Final Net Worth vs. Historical Start Year
+                            </h3>
+                            <ResponsiveContainer height={300} width="100%">
+                                <LineChart
+                                    data={backtestStats.results.filter(
+                                        (r) =>
+                                            r.year + (endAge - startAge) <=
+                                            2024,
+                                    )}
+                                    margin={{
+                                        top: 5,
+                                        right: 35,
+                                        left: 30,
+                                        bottom: 25,
+                                    }}
+                                    onClick={(data) => {
+                                        if (
+                                            data &&
+                                            data.activePayload &&
+                                            data.activePayload[0]
+                                        ) {
+                                            const clickedYear =
+                                                data.activePayload[0].payload
+                                                    .year;
+
+                                            setHistoricalStartYear(clickedYear);
+                                        }
+                                    }}
+                                >
+                                    <CartesianGrid
+                                        opacity={0.5}
+                                        stroke="#555"
+                                        strokeDasharray="3 3"
+                                    />
+                                    <XAxis
+                                        axisLine={{ stroke: "#777" }}
+                                        dataKey="year"
+                                        tick={{ fill: "#bbb", fontSize: 12 }}
+                                        tickLine={{ stroke: "#777" }}
+                                    />
+                                    <YAxis
+                                        axisLine={{ stroke: "#777" }}
+                                        domain={["auto", "auto"]}
+                                        tick={{ fill: "#bbb", fontSize: 12 }}
+                                        tickFormatter={(value) =>
+                                            `$${(value / 1000000).toFixed(1)}M`
+                                        }
+                                        tickLine={{ stroke: "#777" }}
+                                        width={30}
+                                    />
+                                    <Tooltip
+                                        content={
+                                            <BacktestCustomTooltip
+                                                fallbackRealReturnRate={
+                                                    fallbackRealReturnRate
+                                                }
+                                            />
+                                        }
+                                        cursor={{
+                                            stroke: "cyan",
+                                            strokeWidth: 1,
+                                            strokeDasharray: "3 3",
+                                        }}
+                                    />
+                                    <Line
+                                        dataKey="netWorth"
+                                        dot={false}
+                                        name="Final Net Worth"
+                                        stroke={colors.accentLineBacktest}
+                                        strokeWidth={2}
+                                        type="monotone"
+                                    />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
                     </>
                 )}
             </div>
@@ -1310,36 +1639,27 @@ export default function NetWorthCalculator() {
                             <YAxis
                                 axisLine={{ stroke: "#777" }}
                                 domain={["auto", "auto"]}
-                                label={{
-                                    value: "Value (Today's $)",
-                                    angle: -90,
-                                    position: "insideLeft",
-                                    offset: -5,
-                                    fill: "#bbb",
-                                    fontSize: 14,
-                                }}
                                 tick={{ fill: "#bbb", fontSize: 12 }}
                                 tickFormatter={(value) =>
-                                    `$${(value / 1000).toFixed(0)}k`
+                                    `$${(value / 1000000).toFixed(1)}M`
                                 }
                                 tickLine={{ stroke: "#777" }}
-                                width={70} // Increased width for labels
+                                width={30} // Increased width for labels
                             />
                             <Tooltip
-                                content={<CustomTooltip />}
+                                content={
+                                    <CustomTooltip
+                                        historicalStartYear={
+                                            historicalStartYear
+                                        }
+                                        startAge={startAge}
+                                    />
+                                }
                                 cursor={{
                                     stroke: "red",
                                     strokeWidth: 1,
                                     strokeDasharray: "3 3",
                                 }}
-                            />
-                            <Legend
-                                formatter={(value) => (
-                                    <span style={{ color: "#ccc" }}>
-                                        {value}
-                                    </span>
-                                )}
-                                wrapperStyle={{ bottom: 0, left: 20 }}
                             />
                             <Line
                                 dataKey="netWorth"
@@ -1347,24 +1667,6 @@ export default function NetWorthCalculator() {
                                 name="Net Worth"
                                 stroke={colors.accentLine1}
                                 strokeWidth={3}
-                                type="monotone"
-                            />
-                            <Line
-                                dataKey="salary"
-                                dot={false}
-                                name="Income"
-                                stroke={colors.accentLine2}
-                                strokeDasharray="5 5"
-                                strokeWidth={1.5}
-                                type="monotone"
-                            />
-                            <Line
-                                dataKey="annualSavings"
-                                dot={false}
-                                name="Savings"
-                                stroke={colors.accentLine3}
-                                strokeDasharray="1 3"
-                                strokeWidth={1.5}
                                 type="monotone"
                             />
                         </LineChart>
@@ -1379,4 +1681,3 @@ export default function NetWorthCalculator() {
         </div>
     );
 }
-
