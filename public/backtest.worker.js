@@ -71,14 +71,100 @@ const sp500RealReturnsNoDividends = {
 const HISTORICAL_START_YEAR = 1871;
 const CURRENT_MAX_YEAR = 2024;
 
-// --- Helper Functions ---
-function virginiaTaxRate(income) {
-    if (income <= 3000) return 0.02 * income;
-    if (income <= 5000) return 60 + 0.03 * (income - 3000);
-    if (income <= 17000) return 120 + 0.05 * (income - 5000);
-    return 720 + 0.0575 * (income - 17000);
+// --- State Tax Configuration ---
+const stateTaxConfigs = [
+    {
+        name: "Virginia",
+        description: "Virginia's progressive tax system with four brackets",
+        brackets: [
+            { rate: 0.02, minIncome: 0, maxIncome: 3000 },
+            { rate: 0.03, minIncome: 3000, maxIncome: 5000 },
+            { rate: 0.05, minIncome: 5000, maxIncome: 17000 },
+            { rate: 0.0575, minIncome: 17000 }
+        ],
+        standardDeduction: 4500
+    },
+    {
+        name: "California",
+        description: "California's progressive tax system with nine brackets",
+        brackets: [
+            { rate: 0.01, minIncome: 0, maxIncome: 10099 },
+            { rate: 0.02, minIncome: 10099, maxIncome: 23942 },
+            { rate: 0.04, minIncome: 23942, maxIncome: 37788 },
+            { rate: 0.06, minIncome: 37788, maxIncome: 52455 },
+            { rate: 0.08, minIncome: 52455, maxIncome: 66295 },
+            { rate: 0.093, minIncome: 66295, maxIncome: 338639 },
+            { rate: 0.103, minIncome: 338639, maxIncome: 406364 },
+            { rate: 0.113, minIncome: 406364, maxIncome: 677275 },
+            { rate: 0.123, minIncome: 677275 }
+        ],
+        standardDeduction: 5202
+    },
+    {
+        name: "New York",
+        description: "New York's progressive tax system with eight brackets",
+        brackets: [
+            { rate: 0.04, minIncome: 0, maxIncome: 8500 },
+            { rate: 0.045, minIncome: 8500, maxIncome: 11700 },
+            { rate: 0.0525, minIncome: 11700, maxIncome: 13900 },
+            { rate: 0.055, minIncome: 13900, maxIncome: 80650 },
+            { rate: 0.06, minIncome: 80650, maxIncome: 215400 },
+            { rate: 0.0625, minIncome: 215400, maxIncome: 1077550 },
+            { rate: 0.0882, minIncome: 1077550, maxIncome: 25000000 },
+            { rate: 0.0882, minIncome: 25000000 }
+        ],
+        standardDeduction: 8000
+    },
+    {
+        name: "Texas",
+        description: "Texas has no state income tax",
+        brackets: [],
+        standardDeduction: 0
+    },
+    {
+        name: "Florida",
+        description: "Florida has no state income tax",
+        brackets: [],
+        standardDeduction: 0
+    },
+    {
+        name: "Custom",
+        description: "Configure your own tax brackets and rates",
+        brackets: [],
+        standardDeduction: 0
+    }
+];
+
+function calculateStateTax(income, config, customRate = 0, customDeduction = 0) {
+    if (config.name === "Custom") {
+        const taxableIncome = Math.max(0, income - customDeduction);
+        return taxableIncome * (customRate / 100);
+    }
+
+    if (!config.brackets.length) return 0; // No tax for states without income tax
+
+    let taxableIncome = income;
+    if (config.standardDeduction) {
+        taxableIncome = Math.max(0, income - config.standardDeduction);
+    }
+
+    let totalTax = 0;
+    for (const bracket of config.brackets) {
+        if (taxableIncome <= bracket.minIncome) continue;
+
+        const bracketIncome = bracket.maxIncome
+            ? Math.min(taxableIncome, bracket.maxIncome) - bracket.minIncome
+            : taxableIncome - bracket.minIncome;
+
+        if (bracketIncome > 0) {
+            totalTax += bracketIncome * bracket.rate;
+        }
+    }
+
+    return totalTax;
 }
 
+// --- Helper Functions ---
 function federalTaxRate(income) {
     const taxableIncome = Math.max(0, income - 13850);
     if (taxableIncome <= 11000) return taxableIncome * 0.1;
@@ -106,7 +192,10 @@ function generateProjection(simConfig) {
         pSimStartYear,
         pInvestmentReturn,
         pSalarySchedule,
-        pIncludeDividends
+        pIncludeDividends,
+        pStateTaxConfig,
+        pCustomTaxRate,
+        pCustomStandardDeduction
     } = simConfig;
 
     if (pSalarySchedule.length === 0) return [];
@@ -138,7 +227,7 @@ function generateProjection(simConfig) {
         const currentYear = pSimStartYear + i;
         const currentSalary = getSalaryForAge(currentAge);
 
-        const stateTax = virginiaTaxRate(currentSalary);
+        const stateTax = calculateStateTax(currentSalary, pStateTaxConfig, pCustomTaxRate, pCustomStandardDeduction);
         const fedTax = federalTaxRate(currentSalary);
         const totalTax = stateTax + fedTax;
         const afterTaxIncome = Math.max(0, currentSalary - totalTax);
@@ -183,7 +272,10 @@ self.onmessage = function (event) {
             ...config,
             pSimStartYear: year,
             pSalarySchedule: sortedSalarySchedule,
-            pIncludeDividends: config.includeDividends
+            pIncludeDividends: config.includeDividends,
+            pStateTaxConfig: config.stateTaxConfig,
+            pCustomTaxRate: config.customTaxRate,
+            pCustomStandardDeduction: config.customStandardDeduction
         };
 
         const resultData = generateProjection(projectionConfig);

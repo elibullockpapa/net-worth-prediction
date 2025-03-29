@@ -29,6 +29,7 @@ import {
     sp500RealReturnsWithDividends,
     sp500RealReturnsNoDividends,
 } from "@/public/finances";
+import { stateTaxConfigs, type StateTaxConfig } from "@/public/state-taxes";
 
 // Define retro color palette (adjust as needed)
 const colors = {
@@ -282,13 +283,82 @@ const BacktestCustomTooltip = ({
     return null;
 };
 
+interface AgeRangeSliderProps {
+    startAge: number;
+    endAge: number;
+    setStartAge: (value: number) => void;
+    setEndAge: (value: number) => void;
+    colors: typeof colors;
+}
+
+const AgeRangeSlider: React.FC<AgeRangeSliderProps> = ({
+    startAge,
+    endAge,
+    setStartAge,
+    setEndAge,
+    colors,
+}) => {
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-800">
+                    Age Range
+                </span>
+                <div className="flex gap-4">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600">Start:</span>
+                        <span
+                            className={`${colors.readoutBg} px-2 py-1 text-sm min-w-[3rem] text-center`}
+                        >
+                            {startAge}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600">End:</span>
+                        <span
+                            className={`${colors.readoutBg} px-2 py-1 text-sm min-w-[3rem] text-center`}
+                        >
+                            {endAge}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div className="relative py-2">
+                <Slider
+                    classNames={{
+                        base: "w-full",
+                        track: "h-3 rounded-full bg-gradient-to-b from-stone-400 to-stone-500",
+                        filler: "h-3 rounded-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600 shadow-[inset_0_1px_2px_rgba(255,255,255,0.2)]",
+                        thumb: "group top-1/2 -translate-y-1/2 w-8 h-8 bg-gradient-to-b from-gray-100 to-gray-300 rounded-full cursor-grab data-[dragging=true]:cursor-grabbing shadow-[2px_2px_4px_rgba(0,0,0,0.2),-1px_-1px_2px_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.1)] hover:from-gray-50 hover:to-gray-200 active:from-gray-200 active:to-gray-300 active:shadow-[1px_1px_2px_rgba(0,0,0,0.2),-1px_-1px_2px_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.1)] transition-all duration-150",
+                        mark: "hidden",
+                    }}
+                    maxValue={100}
+                    minValue={18}
+                    step={1} // Changed from 5 to 1 for smoother sliding
+                    value={[startAge, endAge]}
+                    onChange={(value) => {
+                        if (Array.isArray(value)) {
+                            const newStart = Math.min(value[0], endAge);
+                            const newEnd = Math.max(value[1], startAge);
+
+                            setStartAge(newStart);
+                            setEndAge(newEnd);
+                        }
+                    }}
+                />
+            </div>
+        </div>
+    );
+};
+
 export default function NetWorthCalculator() {
     // --- State ---
     const [startAge, setStartAge] = useState(22);
     const [endAge, setEndAge] = useState(65);
-    const [initialCash, setInitialCash] = useState(100000);
+    const [initialCash, setInitialCash] = useState(10000);
+    const [initialCashInput, setInitialCashInput] = useState("10000");
     const [fallbackRealReturnRate, setFallbackRealReturnRate] = useState(5);
-    const [savingsRate, setSavingsRate] = useState(20);
+    const [savingsRate, setSavingsRate] = useState(10);
     const [historicalStartYear, setHistoricalStartYear] = useState(1980);
     const [includeDividends, setIncludeDividends] = useState(true);
     const [salarySchedule, setSalarySchedule] = useState<SalaryEntry[]>([
@@ -297,9 +367,14 @@ export default function NetWorthCalculator() {
         { age: 25, salary: 178000 },
         { age: 27, salary: 221000 },
         { age: 29, salary: 287000 },
-        { age: 40, salary: 350000 },
-        { age: 50, salary: 400000 },
     ]);
+    const [selectedStateTax, setSelectedStateTax] = useState<StateTaxConfig>(
+        stateTaxConfigs.find((config) => config.name === "Virginia") ||
+        stateTaxConfigs[0],
+    );
+    const [isCustomTax, setIsCustomTax] = useState(false);
+    const [customTaxRate, setCustomTaxRate] = useState(0);
+    const [customStandardDeduction, setCustomStandardDeduction] = useState(0);
 
     // --- Backtesting State ---
     const [isBacktesting, setIsBacktesting] = useState(false);
@@ -351,6 +426,9 @@ export default function NetWorthCalculator() {
             pInvestmentReturn: fallbackRealReturnRate,
             pSalarySchedule: sortedSalarySchedule,
             includeDividends: includeDividends,
+            stateTaxConfig: selectedStateTax,
+            customTaxRate: isCustomTax ? customTaxRate : 0,
+            customStandardDeduction: isCustomTax ? customStandardDeduction : 0,
         });
 
         // Cleanup function to terminate worker on component unmount
@@ -389,6 +467,9 @@ export default function NetWorthCalculator() {
                 (a, b) => a.age - b.age,
             ),
             includeDividends: debouncedIncludeDividends,
+            stateTaxConfig: selectedStateTax,
+            customTaxRate: isCustomTax ? customTaxRate : 0,
+            customStandardDeduction: isCustomTax ? customStandardDeduction : 0,
         };
 
         workerRef.current.postMessage(config);
@@ -400,6 +481,10 @@ export default function NetWorthCalculator() {
         debouncedFallbackRate,
         debouncedSalarySchedule,
         debouncedIncludeDividends,
+        selectedStateTax,
+        isCustomTax,
+        customTaxRate,
+        customStandardDeduction,
     ]);
 
     // --- Salary Schedule Handlers (Unchanged) ---
@@ -584,58 +669,14 @@ export default function NetWorthCalculator() {
         return { best, worst, avgNetWorth, medianNetWorth, results };
     }, [backtestRawResults]);
 
-    // Replace the AgeRangeSlider component with this new implementation
-    const AgeRangeSlider = () => {
-        return (
-            <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-800">
-                        Age Range
-                    </span>
-                    <div className="flex gap-4">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-600">Start:</span>
-                            <span className={`${colors.readoutBg} px-2 py-1 text-sm min-w-[3rem] text-center`}>
-                                {startAge}
-                            </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-600">End:</span>
-                            <span className={`${colors.readoutBg} px-2 py-1 text-sm min-w-[3rem] text-center`}>
-                                {endAge}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                <div className="relative py-2">
-                    <Slider
-                        classNames={{
-                            base: "w-full",
-                            track: "h-3 rounded-full bg-gradient-to-b from-stone-400 to-stone-500",
-                            filler: "h-3 rounded-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600 shadow-[inset_0_1px_2px_rgba(255,255,255,0.2)]",
-                            thumb: "group top-1/2 -translate-y-1/2 w-8 h-8 bg-gradient-to-b from-gray-100 to-gray-300 rounded-full cursor-grab data-[dragging=true]:cursor-grabbing shadow-[2px_2px_4px_rgba(0,0,0,0.2),-1px_-1px_2px_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.1)] hover:from-gray-50 hover:to-gray-200 active:from-gray-200 active:to-gray-300 active:shadow-[1px_1px_2px_rgba(0,0,0,0.2),-1px_-1px_2px_rgba(255,255,255,0.8),inset_0_0_0_1px_rgba(0,0,0,0.1)] transition-all duration-150",
-                            mark: "hidden"
-                        }}
-                        defaultValue={[startAge, endAge]}
-                        maxValue={110}
-                        minValue={0}
-                        step={5}
-                        value={[startAge, endAge]}
-                        onChange={(value) => {
-                            if (Array.isArray(value)) {
-                                setStartAge(value[0]);
-                                setEndAge(value[1]);
-                            }
-                        }}
-                    />
-                </div>
-                <div className="flex justify-between text-xs text-gray-600 font-medium">
-                    <span>0</span>
-                    <span>110</span>
-                </div>
-            </div>
+    // Add this new function before the return statement
+    const currentProjectionUsesFallback = useMemo(() => {
+        if (!tableData || tableData.length === 0) return false;
+
+        return tableData.some(
+            (data) => data.returnRate === fallbackRealReturnRate,
         );
-    };
+    }, [tableData, fallbackRealReturnRate]);
 
     // --- Component Rendering ---
     return (
@@ -678,20 +719,32 @@ export default function NetWorthCalculator() {
                     <legend
                         className={`px-3 py-1 text-lg font-semibold ${colors.legendBg} ${colors.legendText} rounded-md -mt-8 mb-4 inline-block ${colors.panelShadow}`}
                     >
-                        Simulation Setup
+                        Key Parameters
                     </legend>
                     <div className="space-y-5 p-2">
-                        {/* Replace the Start Age and End Age inputs with the new slider */}
-                        <AgeRangeSlider />
+                        <AgeRangeSlider
+                            colors={colors}
+                            endAge={endAge}
+                            setEndAge={setEndAge}
+                            setStartAge={setStartAge}
+                            startAge={startAge}
+                        />
 
                         {/* Keep the rest of the inputs */}
                         {[
                             {
                                 label: `Initial Cash (${formatCurrency(initialCash)})`,
-                                value: initialCash,
+                                value: initialCashInput,
                                 setter: setInitialCash,
                                 min: 0,
-                                step: 1000,
+                                type: "text",
+                                onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                                    const value = e.target.value.replace(/[^0-9]/g, '');
+                                    setInitialCashInput(value);
+                                },
+                                onBlur: () => {
+                                    setInitialCash(initialCashInput ? parseInt(initialCashInput) : 0);
+                                }
                             },
                             {
                                 label: "Savings Rate (% After-Tax)",
@@ -701,13 +754,7 @@ export default function NetWorthCalculator() {
                                 max: 100,
                                 step: 1,
                             },
-                            {
-                                label: "Fallback Annual Real Return (%)",
-                                value: fallbackRealReturnRate,
-                                setter: setFallbackRealReturnRate,
-                                step: 0.1,
-                            },
-                        ].map(({ label, value, setter, min, max, step }) => (
+                        ].map(({ label, value, setter, min, max, step, type, onChange, onBlur }) => (
                             <label
                                 key={label}
                                 className="flex flex-col text-sm font-medium text-gray-800"
@@ -718,27 +765,16 @@ export default function NetWorthCalculator() {
                                     max={max}
                                     min={min}
                                     step={step}
-                                    type="number"
+                                    type={type || "number"}
                                     value={value}
-                                    onChange={(e) => {
+                                    onChange={onChange || ((e) => {
                                         let numVal = Number(e.target.value);
-
-                                        if (min !== undefined)
-                                            numVal = Math.max(min, numVal);
-                                        if (max !== undefined)
-                                            numVal = Math.min(max, numVal);
-                                        setter(
-                                            isNaN(numVal) ? (min ?? 0) : numVal,
-                                        );
-                                    }}
+                                        if (min !== undefined) numVal = Math.max(min, numVal);
+                                        if (max !== undefined) numVal = Math.min(max, numVal);
+                                        setter(isNaN(numVal) ? (min ?? 0) : numVal);
+                                    })}
+                                    onBlur={onBlur}
                                 />
-                                {label ===
-                                    "Fallback Annual Real Return (%)" && (
-                                        <span className="text-xs text-gray-600 mt-1 italic">
-                                            Used when historical data is not
-                                            available.
-                                        </span>
-                                    )}
                             </label>
                         ))}
 
@@ -785,38 +821,112 @@ export default function NetWorthCalculator() {
                     </div>
                 </fieldset>
 
-                {/* --- Column 2: Investment & Historical --- */}
+                {/* --- Column 2: State Tax Configuration --- */}
                 <fieldset
                     className={`p-5 rounded-lg ${colors.panelBg} ${colors.panelShadow}`}
                 >
                     <legend
                         className={`px-3 py-1 text-lg font-semibold ${colors.legendBg} ${colors.legendText} rounded-md -mt-8 mb-4 inline-block ${colors.panelShadow}`}
                     >
-                        Investment Engine
+                        State Tax Configuration
                     </legend>
                     <div className="space-y-5 p-2">
-                        <label className="flex flex-col text-sm font-medium text-gray-800">
-                            Projection Start Year
-                            <input
-                                className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
-                                min={HISTORICAL_START_YEAR}
-                                type="number"
-                                value={historicalStartYear}
-                                onChange={(e) =>
-                                    setHistoricalStartYear(
-                                        Math.max(
-                                            HISTORICAL_START_YEAR,
-                                            parseInt(e.target.value) ||
-                                            HISTORICAL_START_YEAR,
-                                        ),
-                                    )
-                                }
-                            />
-                            <span className="text-xs text-gray-600 mt-1 italic">
-                                Select sequence start (from{" "}
-                                {HISTORICAL_START_YEAR}).
-                            </span>
-                        </label>
+                        <div className="space-y-4">
+                            <label className="flex flex-col text-sm font-medium text-gray-800">
+                                Select State Tax System
+                                <select
+                                    className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
+                                    value={selectedStateTax.name}
+                                    onChange={(e) => {
+                                        const config = stateTaxConfigs.find(
+                                            (c) => c.name === e.target.value,
+                                        );
+
+                                        if (config) {
+                                            setSelectedStateTax(config);
+                                            setIsCustomTax(
+                                                config.name === "Custom",
+                                            );
+                                        }
+                                    }}
+                                >
+                                    {stateTaxConfigs.map((config) => (
+                                        <option
+                                            key={config.name}
+                                            value={config.name}
+                                        >
+                                            {config.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            <div className="text-xs text-gray-600 italic">
+                                {selectedStateTax.description}
+                            </div>
+                            {selectedStateTax.brackets.length > 0 && (
+                                <div className="text-xs text-gray-600">
+                                    <p className="font-medium mb-1">
+                                        Tax Brackets:
+                                    </p>
+                                    <ul className="space-y-0.5">
+                                        {selectedStateTax.brackets.map(
+                                            (bracket, index) => (
+                                                <li key={index}>
+                                                    {(
+                                                        bracket.rate * 100
+                                                    ).toFixed(1)}
+                                                    % on{" "}
+                                                    {bracket.minIncome === 0
+                                                        ? "first"
+                                                        : `$${bracket.minIncome.toLocaleString()} to`}{" "}
+                                                    {bracket.maxIncome
+                                                        ? `$${bracket.maxIncome.toLocaleString()}`
+                                                        : "and above"}
+                                                </li>
+                                            ),
+                                        )}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+
+                        {isCustomTax && (
+                            <div className="pt-4 border-t border-gray-300">
+                                <div className="space-y-4">
+                                    <label className="flex flex-col text-sm font-medium text-gray-800">
+                                        Custom Tax Rate (%)
+                                        <input
+                                            className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
+                                            max="100"
+                                            min="0"
+                                            step="0.1"
+                                            type="number"
+                                            value={customTaxRate}
+                                            onChange={(e) =>
+                                                setCustomTaxRate(
+                                                    Number(e.target.value),
+                                                )
+                                            }
+                                        />
+                                    </label>
+                                    <label className="flex flex-col text-sm font-medium text-gray-800">
+                                        Standard Deduction
+                                        <input
+                                            className={`mt-1 p-2 rounded-md ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-stone-300 focus:ring-sky-500`}
+                                            min="0"
+                                            step="100"
+                                            type="number"
+                                            value={customStandardDeduction}
+                                            onChange={(e) =>
+                                                setCustomStandardDeduction(
+                                                    Number(e.target.value),
+                                                )
+                                            }
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </fieldset>
 
@@ -952,64 +1062,73 @@ export default function NetWorthCalculator() {
                         <p className="text-sm text-gray-400 mb-6 px-2 italic">
                             Final net worth results if your simulation (
                             {startAge}-{endAge}) began in different historical
-                            years ({HISTORICAL_START_YEAR}-{2024}). Recalculates
-                            automatically after changes.
+                            years ({HISTORICAL_START_YEAR}-2024). Only shows
+                            results where the simulation period ends in 2024 or
+                            earlier. Recalculates automatically after changes.
                         </p>
 
                         {/* Stats Panels */}
                         <div className="text-xs mt-4 mb-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 px-2">
-                            <div
-                                className={`${colors.statsPanelBg} p-3 rounded-md border-green-600 bg-green-100 text-green-900`}
-                            >
-                                <strong className="block text-sm mb-1">
+                            <div className="bg-gray-900/90 rounded-md border border-green-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(0,255,0,0.1)]">
+                                <strong className="block text-green-400 font-bold mb-1 text-sm">
                                     BEST Period Start: {backtestStats.best.year}
                                 </strong>
-                                Final Net Worth:{" "}
-                                <strong className="font-mono">
-                                    {formatCurrencyDetailed(
-                                        backtestStats.best.netWorth,
-                                    )}
-                                </strong>
+                                <div className="bg-black/50 p-2 rounded shadow-inner">
+                                    <span className="text-green-600 text-xs">
+                                        Final Net Worth:
+                                    </span>
+                                    <strong className="block font-mono text-green-400 text-lg tracking-wider mt-1">
+                                        {formatCurrencyDetailed(
+                                            backtestStats.best.netWorth,
+                                        )}
+                                    </strong>
+                                </div>
                             </div>
-                            <div
-                                className={`${colors.statsPanelBg} p-3 rounded-md border-red-600 bg-red-100 text-red-900`}
-                            >
-                                <strong className="block text-sm mb-1">
+                            <div className="bg-gray-900/90 rounded-md border border-red-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(255,0,0,0.1)]">
+                                <strong className="block text-red-400 font-bold mb-1 text-sm">
                                     WORST Period Start:{" "}
                                     {backtestStats.worst.year}
                                 </strong>
-                                Final Net Worth:{" "}
-                                <strong className="font-mono">
-                                    {formatCurrencyDetailed(
-                                        backtestStats.worst.netWorth,
-                                    )}
-                                </strong>
+                                <div className="bg-black/50 p-2 rounded shadow-inner">
+                                    <span className="text-red-600 text-xs">
+                                        Final Net Worth:
+                                    </span>
+                                    <strong className="block font-mono text-red-400 text-lg tracking-wider mt-1">
+                                        {formatCurrencyDetailed(
+                                            backtestStats.worst.netWorth,
+                                        )}
+                                    </strong>
+                                </div>
                             </div>
-                            <div
-                                className={`${colors.statsPanelBg} p-3 rounded-md border-blue-600 bg-blue-100 text-blue-900`}
-                            >
-                                <strong className="block text-sm mb-1">
+                            <div className="bg-gray-900/90 rounded-md border border-blue-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(0,0,255,0.1)]">
+                                <strong className="block text-blue-400 font-bold mb-1 text-sm">
                                     AVERAGE Final NW
                                 </strong>
-                                Across all periods:{" "}
-                                <strong className="font-mono">
-                                    {formatCurrencyDetailed(
-                                        backtestStats.avgNetWorth,
-                                    )}
-                                </strong>
+                                <div className="bg-black/50 p-2 rounded shadow-inner">
+                                    <span className="text-blue-600 text-xs">
+                                        Across all periods:
+                                    </span>
+                                    <strong className="block font-mono text-blue-400 text-lg tracking-wider mt-1">
+                                        {formatCurrencyDetailed(
+                                            backtestStats.avgNetWorth,
+                                        )}
+                                    </strong>
+                                </div>
                             </div>
-                            <div
-                                className={`${colors.statsPanelBg} p-3 rounded-md border-purple-600 bg-purple-100 text-purple-900`}
-                            >
-                                <strong className="block text-sm mb-1">
+                            <div className="bg-gray-900/90 rounded-md border border-purple-500/30 p-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_1px_2px_rgba(128,0,255,0.1)]">
+                                <strong className="block text-purple-400 font-bold mb-1 text-sm">
                                     MEDIAN Final NW
                                 </strong>
-                                Across all periods:{" "}
-                                <strong className="font-mono">
-                                    {formatCurrencyDetailed(
-                                        backtestStats.medianNetWorth,
-                                    )}
-                                </strong>
+                                <div className="bg-black/50 p-2 rounded shadow-inner">
+                                    <span className="text-purple-600 text-xs">
+                                        Across all periods:
+                                    </span>
+                                    <strong className="block font-mono text-purple-400 text-lg tracking-wider mt-1">
+                                        {formatCurrencyDetailed(
+                                            backtestStats.medianNetWorth,
+                                        )}
+                                    </strong>
+                                </div>
                             </div>
                         </div>
 
@@ -1018,7 +1137,9 @@ export default function NetWorthCalculator() {
                         </h3>
                         <ResponsiveContainer height={300} width="100%">
                             <LineChart
-                                data={backtestStats.results}
+                                data={backtestStats.results.filter(
+                                    (r) => r.year + (endAge - startAge) <= 2024,
+                                )}
                                 margin={{
                                     top: 5,
                                     right: 35,
@@ -1103,9 +1224,51 @@ export default function NetWorthCalculator() {
                 className={`mt-10 p-6 rounded-lg ${colors.chartPanelBg} ${colors.chartPanelShadow}`}
             >
                 <div className="flex justify-between items-center mb-5 px-2">
-                    <h2 className="text-xl font-semibold text-gray-300 text-shadow-sm shadow-black/50">
-                        Net Worth Projection Visualizer
-                    </h2>
+                    <div>
+                        <h2 className="text-xl font-semibold text-gray-300 text-shadow-sm shadow-black/50">
+                            Backtest Results For Starting in Year
+                            <input
+                                className={`w-20 ml-2 p-1 mx-1 rounded inline-block ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} text-center focus:outline-none focus:ring-1 focus:ring-sky-500`}
+                                min={HISTORICAL_START_YEAR}
+                                type="number"
+                                value={historicalStartYear}
+                                onChange={(e) =>
+                                    setHistoricalStartYear(
+                                        Math.max(
+                                            HISTORICAL_START_YEAR,
+                                            parseInt(e.target.value) ||
+                                            HISTORICAL_START_YEAR,
+                                        ),
+                                    )
+                                }
+                            />
+                        </h2>
+                        {currentProjectionUsesFallback && (
+                            <div className="mt-2 flex items-center gap-2">
+                                <label
+                                    className="text-sm font-medium text-gray-300"
+                                    htmlFor="fallback-rate"
+                                >
+                                    Fallback Annual Real Return (%):
+                                </label>
+                                <input
+                                    className={`w-20 p-1 rounded ${colors.inputBg} ${colors.inputBorder} ${colors.inputText} text-center focus:outline-none focus:ring-1 focus:ring-sky-500`}
+                                    id="fallback-rate"
+                                    step="0.1"
+                                    type="number"
+                                    value={fallbackRealReturnRate}
+                                    onChange={(e) =>
+                                        setFallbackRealReturnRate(
+                                            Number(e.target.value),
+                                        )
+                                    }
+                                />
+                                <span className="text-xs text-gray-400 italic">
+                                    Used for years after 2024
+                                </span>
+                            </div>
+                        )}
+                    </div>
                     <div className="text-right">
                         <span className="text-sm font-medium text-gray-400 block">
                             Est. Net Worth at Age {endAge}:
@@ -1217,20 +1380,3 @@ export default function NetWorthCalculator() {
     );
 }
 
-// Add this to your global CSS or a style tag if you need text-shadow utility
-/*
-@layer utilities {
-  .text-shadow-sm {
-    text-shadow: 0 1px 2px var(--tw-shadow-color, rgba(0,0,0,0.5));
-  }
-  .text-shadow {
-    text-shadow: 0 2px 4px var(--tw-shadow-color, rgba(0,0,0,0.5));
-  }
-  .text-shadow-lg {
-    text-shadow: 0 10px 15px var(--tw-shadow-color, rgba(0,0,0,0.5));
-  }
-  .text-shadow-none {
-    text-shadow: none;
-  }
-}
-*/
