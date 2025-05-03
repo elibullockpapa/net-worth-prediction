@@ -355,37 +355,42 @@ const BacktestCustomTooltip = ({
     label,
     fallbackRealReturnRate,
 }: TooltipProps<ValueType, NameType> & { fallbackRealReturnRate: number }) => {
-    if (active && payload && payload.length) {
-        const data = payload[0].payload;
-
-        return (
-            <div
-                className={`${colors.tooltipBg} p-3 rounded ${colors.tooltipText}`}
-            >
-                <p className="font-bold text-base mb-2 border-b border-amber-600 pb-1">
-                    Start Year: {data.year}
-                </p>
-                <div className="space-y-1 text-sm font-medium">
-                    <p>
-                        Final Net Worth:{" "}
-                        <span className="font-bold">
-                            {formatCurrency(data.netWorth)}
-                        </span>
-                    </p>
-                    <p>Avg. Return: {data.avgReturn.toFixed(2)}%</p>
-                    {data.usedEstimatedReturns && (
-                        <p className="text-red-700 font-semibold mt-2 border-t border-red-200 pt-2">
-                            ⚠️ {data.estimatedReturnYears} year
-                            {data.estimatedReturnYears === 1 ? "" : "s"} used
-                            fallback returns of {fallbackRealReturnRate}%
-                        </p>
-                    )}
-                </div>
-            </div>
-        );
+    if (!active || !payload || !payload.length || !payload[0]?.payload) {
+        return null;
     }
 
-    return null;
+    const data = payload[0].payload;
+
+    // Add null checks for all data fields
+    const netWorth = typeof data.netWorth === 'number' ? data.netWorth : 0;
+    const avgReturn = typeof data.avgReturn === 'number' ? data.avgReturn : 0;
+    const year = typeof data.year === 'number' ? data.year : 0;
+    const usedEstimatedReturns = !!data.usedEstimatedReturns;
+    const estimatedReturnYears = typeof data.estimatedReturnYears === 'number' ? data.estimatedReturnYears : 0;
+
+    return (
+        <div className={`${colors.tooltipBg} p-3 rounded ${colors.tooltipText}`}>
+            <p className="font-bold text-base mb-2 border-b border-amber-600 pb-1">
+                Start Year: {year}
+            </p>
+            <div className="space-y-1 text-sm font-medium">
+                <p>
+                    Final Net Worth:{" "}
+                    <span className="font-bold">
+                        {formatCurrency(netWorth)}
+                    </span>
+                </p>
+                <p>Avg. Return: {avgReturn.toFixed(2)}%</p>
+                {usedEstimatedReturns && (
+                    <p className="text-red-700 font-semibold mt-2 border-t border-red-200 pt-2">
+                        ⚠️ {estimatedReturnYears} year
+                        {estimatedReturnYears === 1 ? "" : "s"} used
+                        fallback returns of {fallbackRealReturnRate}%
+                    </p>
+                )}
+            </div>
+        </div>
+    );
 };
 
 interface AgeRangeSliderProps {
@@ -1437,11 +1442,10 @@ export default function NetWorthCalculator() {
                                 />
                                 {/* Percentile markers (rendered first, so they appear below) */}
                                 <Scatter
-                                    data={percentiles.map(({ percentile, value }) => ({
-                                        netWorth: value,
+                                    data={percentiles.map((p) => ({
+                                        ...p, // Include all the result data
                                         y: 0,
                                         isPercentile: true,
-                                        percentile: percentile,
                                     }))}
                                     fill="#FFF"
                                     label={{
@@ -1475,8 +1479,8 @@ export default function NetWorthCalculator() {
                                 <LineChart
                                     data={backtestStats.results.filter(
                                         (r) =>
-                                            r.year + (endAge - startAge) <=
-                                            2024,
+                                            r.year + (endAge - startAge) <= 2024 &&
+                                            !r.usedEstimatedReturns
                                     )}
                                     margin={{
                                         top: 5,

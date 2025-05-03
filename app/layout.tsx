@@ -1,3 +1,5 @@
+// app/layout.tsx
+
 import "@/styles/globals.css";
 import { Metadata, Viewport } from "next";
 import clsx from "clsx";

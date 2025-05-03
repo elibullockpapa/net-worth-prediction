@@ -318,35 +318,53 @@ self.onmessage = function (event) {
     }
 
     // Calculate percentiles
-    const sortedResults = [...results].sort((a, b) => a.netWorth - b.netWorth);
+    const validResults = results.filter(result => {
+        // Only include results that don't use any estimated returns
+        // AND where the entire simulation period uses historical data
+        const simulationEndYear = result.year + (config.pEndAge - config.pStartAge);
+        return !result.usedEstimatedReturns && simulationEndYear <= CURRENT_MAX_YEAR;
+    });
+    const sortedResults = [...validResults].sort((a, b) => a.netWorth - b.netWorth);
     const N = sortedResults.length;
 
     const calculatePercentile = (p) => {
-        if (p === 0) return sortedResults[0].netWorth;
-        if (p === 100) return sortedResults[N - 1].netWorth;
+        if (N === 0) return { value: 0, result: null };
+        if (p === 0) return { value: sortedResults[0].netWorth, result: sortedResults[0] };
+        if (p === 100) return { value: sortedResults[N - 1].netWorth, result: sortedResults[N - 1] };
 
         const index = (p / 100) * (N - 1);
         const lowerIndex = Math.floor(index);
         const upperIndex = Math.ceil(index);
         const weight = index - lowerIndex;
 
-        if (upperIndex >= N) return sortedResults[N - 1].netWorth;
+        if (upperIndex >= N) return { value: sortedResults[N - 1].netWorth, result: sortedResults[N - 1] };
 
         const lowerValue = sortedResults[lowerIndex].netWorth;
         const upperValue = sortedResults[upperIndex].netWorth;
+        const interpolatedValue = lowerValue + weight * (upperValue - lowerValue);
 
-        return lowerValue + weight * (upperValue - lowerValue);
+        // Use the closest result to the interpolated value
+        const closestResult = Math.abs(sortedResults[lowerIndex].netWorth - interpolatedValue) <
+            Math.abs(sortedResults[upperIndex].netWorth - interpolatedValue)
+            ? sortedResults[lowerIndex]
+            : sortedResults[upperIndex];
+
+        return { value: interpolatedValue, result: closestResult };
     };
 
     // Use custom percentiles if provided, otherwise use defaults
     const percentilesToCalculate = config.percentiles || [10, 50];
-    const percentiles = percentilesToCalculate.map(p => ({
-        percentile: p,
-        value: calculatePercentile(p)
-    }));
+    const percentiles = percentilesToCalculate.map(p => {
+        const { value, result } = calculatePercentile(p);
+        return {
+            percentile: p,
+            value,
+            ...result // Spread all the result data
+        };
+    });
 
     self.postMessage({
-        results,
+        results: validResults,
         percentiles
     });
 }; 
